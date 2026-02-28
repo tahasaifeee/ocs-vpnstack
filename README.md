@@ -2,6 +2,35 @@
 
 A self-hosted OpenConnect VPN management stack built on **ocserv**, with a full web dashboard, OTP/TOTP support, per-user routing, and traffic statistics.
 
+## One-Click Install
+
+Run this single command on any Linux machine (Ubuntu, Debian, CentOS, Fedora, Arch, Alpine):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)
+```
+
+The script will:
+- Install Docker and Docker Compose if not already present
+- Clone this repository to `/opt/ocs-vpnstack`
+- Ask you for: server IP/domain, dashboard port, VPN port, admin credentials, and TLS cert type
+- Generate TLS certificates (self-signed or Let's Encrypt)
+- Write the `.env` file with auto-generated secrets
+- Build and start all services
+- Open firewall ports via ufw / firewalld automatically
+
+> **Custom install directory**
+> ```bash
+> INSTALL_DIR=/home/myuser/vpn bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)
+> ```
+
+> **Uninstall** (removes all containers, volumes, and files)
+> ```bash
+> bash /opt/ocs-vpnstack/setup.sh --uninstall
+> ```
+
+---
+
 ## Architecture
 
 ```
@@ -27,32 +56,42 @@ A self-hosted OpenConnect VPN management stack built on **ocserv**, with a full 
 
 ## Quick Start
 
-### 1. Clone and configure
+### Option A — One-click (recommended)
 
 ```bash
-git clone <this-repo>
+bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)
+```
+
+Follow the interactive prompts. Done.
+
+### Option B — Manual
+
+#### 1. Clone and configure
+
+```bash
+git clone https://github.com/tahasaifeee/ocs-vpnstack.git
 cd ocs-vpnstack
 cp .env.example .env
 # Edit .env — set POSTGRES_PASSWORD and SECRET_KEY
 ```
 
-### 2. Generate TLS certs for nginx
+#### 2. Generate TLS certs for nginx
 
 ```bash
 mkdir -p nginx/certs
 openssl req -x509 -nodes -newkey rsa:4096 \
   -keyout nginx/certs/server.key \
   -out nginx/certs/server.crt \
-  -days 365 -subj "/CN=vpn-dashboard"
+  -days 3650 -subj "/CN=your-server-ip"
 ```
 
-### 3. Build and run
+#### 3. Build and run
 
 ```bash
 docker compose up -d --build
 ```
 
-### 4. Access the dashboard
+#### 4. Access the dashboard
 
 Open **https://\<your-host\>:8443** in a browser.
 
@@ -96,6 +135,7 @@ Default credentials: `admin` / `admin` — **change immediately** via the Users 
 
 ```
 ocs-vpnstack/
+├── setup.sh            # One-click installer (run via curl | bash)
 ├── docker-compose.yml
 ├── .env.example
 ├── ocserv/

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Users, Plus, Pencil, Trash2, Shield, Loader2, X, ChevronDown } from 'lucide-react'
+import { Users, Plus, Pencil, Trash2, Shield, Loader2, X } from 'lucide-react'
 import { groupsApi } from '../api/client'
 import type { Group } from '../types'
 

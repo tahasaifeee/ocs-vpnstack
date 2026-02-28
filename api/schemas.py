@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     username: str
     password: str
+    totp_code: str | None = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -21,6 +22,17 @@ class AdminUpdateRequest(BaseModel):
     current_password: str
     new_password: str | None = Field(None, min_length=8)
     new_username: str | None = Field(None, min_length=1, max_length=64)
+
+class TotpSetupResponse(BaseModel):
+    totp_secret: str
+    totp_uri: str
+    qr_data_url: str
+
+class TotpEnableRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+
+class TotpDisableRequest(BaseModel):
+    password: str
 
 
 # ── VPN Users ─────────────────────────────────────────────────────────────────

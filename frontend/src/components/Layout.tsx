@@ -1,11 +1,11 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Shield, Users, Activity, BarChart2, LogOut } from 'lucide-react'
+import { Shield, Users, Activity, BarChart2, Settings, LogOut } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 
 const navItems = [
-  { to: '/users', icon: Users, label: 'Users' },
-  { to: '/sessions', icon: Activity, label: 'Sessions' },
-  { to: '/stats', icon: BarChart2, label: 'Stats' },
+  { to: '/users',    icon: Users,     label: 'Users' },
+  { to: '/sessions', icon: Activity,  label: 'Sessions' },
+  { to: '/stats',    icon: BarChart2, label: 'Stats' },
 ]
 
 export default function Layout() {
@@ -45,14 +45,31 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="px-4 py-4 border-t border-gray-800">
-          <p className="text-xs text-gray-500 mb-2 truncate">{adminUsername}</p>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition-colors"
+        {/* Bottom: admin identity + settings + logout */}
+        <div className="px-2 py-4 border-t border-gray-800 space-y-1">
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
+              }`
+            }
           >
-            <LogOut size={14} /> Logout
-          </button>
+            <Settings size={16} />
+            Settings
+          </NavLink>
+
+          <div className="px-3 pt-2">
+            <p className="text-xs text-gray-500 mb-2 truncate">{adminUsername}</p>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition-colors"
+            >
+              <LogOut size={14} /> Logout
+            </button>
+          </div>
         </div>
       </aside>
 

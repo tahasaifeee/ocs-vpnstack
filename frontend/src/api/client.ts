@@ -35,11 +35,16 @@ api.interceptors.response.use(
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export const authApi = {
-  login: (username: string, password: string) =>
-    api.post('/auth/login', { username, password }).then((r) => r.data),
+  login: (username: string, password: string, totp_code?: string) =>
+    api.post('/auth/login', { username, password, totp_code }).then((r) => r.data),
   refresh: (refresh_token: string) =>
     api.post('/auth/refresh', { refresh_token }).then((r) => r.data),
   me: () => api.get('/auth/me').then((r) => r.data),
+  updateMe: (data: { current_password: string; new_password?: string; new_username?: string }) =>
+    api.patch('/auth/me', data).then((r) => r.data),
+  setupTotp: () => api.post('/auth/totp/setup').then((r) => r.data),
+  enableTotp: (code: string) => api.post('/auth/totp/enable', { code }).then((r) => r.data),
+  disableTotp: (password: string) => api.post('/auth/totp/disable', { password }).then((r) => r.data),
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────

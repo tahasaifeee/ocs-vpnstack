@@ -1,11 +1,13 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Shield, Users, Activity, BarChart2, Settings, LogOut } from 'lucide-react'
+import { Shield, Users, Activity, BarChart2, Settings, LogOut, UsersRound, Network } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 
 const navItems = [
-  { to: '/users',    icon: Users,     label: 'Users' },
-  { to: '/sessions', icon: Activity,  label: 'Sessions' },
-  { to: '/stats',    icon: BarChart2, label: 'Stats' },
+  { to: '/users',    icon: Users,       label: 'Users' },
+  { to: '/sessions', icon: Activity,    label: 'Sessions' },
+  { to: '/stats',    icon: BarChart2,   label: 'Stats' },
+  { to: '/groups',   icon: UsersRound,  label: 'Groups' },
+  { to: '/network',  icon: Network,     label: 'Network' },
 ]
 
 export default function Layout() {

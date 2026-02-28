@@ -1,3 +1,15 @@
+export interface Group {
+  id: number
+  name: string
+  description: string | null
+  max_sessions: number | null
+  quota_bytes: number | null
+  dns_servers: string | null
+  split_tunnel: boolean
+  session_timeout: number | null
+  user_count: number
+}
+
 export interface VpnUser {
   id: number
   username: string
@@ -7,6 +19,10 @@ export interface VpnUser {
   quota_bytes: number | null
   notes: string | null
   created_at: string
+  group_id: number | null
+  static_ip: string | null
+  max_sessions: number | null
+  dns_servers: string | null
 }
 
 export interface VpnUserWithOtp extends VpnUser {
@@ -28,6 +44,9 @@ export interface ActiveSession {
   connected_since: string
   rx_bytes: number
   tx_bytes: number
+  geo_country: string | null
+  geo_country_code: string | null
+  geo_city: string | null
 }
 
 export interface SessionLog {
@@ -49,4 +68,14 @@ export interface UserStats {
   total_bytes_out: number
   total_sessions: number
   last_seen: string | null
+}
+
+export interface NetworkConfig {
+  ipv4_network: string
+  ipv4_netmask: string
+  dns_servers: string[]
+  max_clients: number
+  max_same_clients: number
+  ipv6_network: string | null
+  tunnel_all_dns: boolean
 }

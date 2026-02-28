@@ -82,3 +82,19 @@ export const statsApi = {
   all: () => api.get('/stats/users').then((r) => r.data),
   user: (username: string) => api.get(`/stats/users/${username}`).then((r) => r.data),
 }
+
+// ── Groups ────────────────────────────────────────────────────────────────────
+
+export const groupsApi = {
+  list: () => api.get('/groups').then((r) => r.data),
+  create: (data: unknown) => api.post('/groups', data).then((r) => r.data),
+  update: (id: number, data: unknown) => api.patch(`/groups/${id}`, data).then((r) => r.data),
+  delete: (id: number) => api.delete(`/groups/${id}`),
+}
+
+// ── Network ───────────────────────────────────────────────────────────────────
+
+export const networkApi = {
+  get: () => api.get('/network').then((r) => r.data),
+  update: (data: unknown) => api.put('/network', data).then((r) => r.data),
+}

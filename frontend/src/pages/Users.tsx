@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Power, Route, RefreshCw, Search } from 'lucide-react'
-import { usersApi, routesApi } from '../api/client'
-import type { VpnUser, VpnUserWithOtp, Route as VpnRoute } from '../types'
+import { usersApi, routesApi, groupsApi } from '../api/client'
+import type { VpnUser, VpnUserWithOtp, Route as VpnRoute, Group } from '../types'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,11 @@ function UserModal({
   const qc = useQueryClient()
   const isEdit = !!user
 
+  const { data: groups = [] } = useQuery<Group[]>({
+    queryKey: ['groups'],
+    queryFn: groupsApi.list,
+  })
+
   const [form, setForm] = useState({
     username: user?.username ?? '',
     password: '',
@@ -38,13 +43,24 @@ function UserModal({
     otp_enabled: user?.otp_enabled ?? false,
     quota_bytes: user?.quota_bytes?.toString() ?? '',
     notes: user?.notes ?? '',
+    group_id: user?.group_id?.toString() ?? '',
+    static_ip: user?.static_ip ?? '',
+    max_sessions: user?.max_sessions?.toString() ?? '',
+    dns_servers: user?.dns_servers ?? '',
   })
   const [created, setCreated] = useState<VpnUserWithOtp | null>(null)
   const [error, setError] = useState('')
 
   const createMut = useMutation({
     mutationFn: (data: typeof form) =>
-      usersApi.create({ ...data, quota_bytes: data.quota_bytes ? +data.quota_bytes : null }),
+      usersApi.create({
+        ...data,
+        quota_bytes: data.quota_bytes ? +data.quota_bytes : null,
+        group_id: data.group_id ? +data.group_id : null,
+        max_sessions: data.max_sessions ? +data.max_sessions : null,
+        static_ip: data.static_ip || null,
+        dns_servers: data.dns_servers || null,
+      }),
     onSuccess: (data: VpnUserWithOtp) => {
       qc.invalidateQueries({ queryKey: ['users'] })
       setCreated(data)
@@ -58,6 +74,10 @@ function UserModal({
         ...data,
         password: data.password || undefined,
         quota_bytes: data.quota_bytes ? +data.quota_bytes : null,
+        group_id: data.group_id ? +data.group_id : null,
+        max_sessions: data.max_sessions ? +data.max_sessions : null,
+        static_ip: data.static_ip || null,
+        dns_servers: data.dns_servers || null,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })
@@ -136,6 +156,43 @@ function UserModal({
               type="number"
               value={form.quota_bytes}
               onChange={(e) => setForm({ ...form, quota_bytes: e.target.value })}
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Group (optional)">
+            <select
+              value={form.group_id}
+              onChange={(e) => setForm({ ...form, group_id: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">— No group —</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Static IP (optional, e.g. 172.16.1.10)">
+            <input
+              value={form.static_ip}
+              onChange={(e) => setForm({ ...form, static_ip: e.target.value })}
+              placeholder="blank = dynamic"
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Max sessions override (blank = group/global default)">
+            <input
+              type="number"
+              min={1}
+              value={form.max_sessions}
+              onChange={(e) => setForm({ ...form, max_sessions: e.target.value })}
+              className={inputCls}
+            />
+          </Field>
+          <Field label="DNS servers override (comma-separated, blank = group/global)">
+            <input
+              value={form.dns_servers}
+              onChange={(e) => setForm({ ...form, dns_servers: e.target.value })}
+              placeholder="8.8.8.8, 1.1.1.1"
               className={inputCls}
             />
           </Field>
@@ -278,6 +335,13 @@ export default function Users() {
     queryFn: usersApi.list,
   })
 
+  const { data: groups = [] } = useQuery<Group[]>({
+    queryKey: ['groups'],
+    queryFn: groupsApi.list,
+  })
+
+  const groupById = (id?: number | null) => groups.find((g) => g.id === id)?.name
+
   const deleteMut = useMutation({
     mutationFn: usersApi.delete,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
@@ -324,6 +388,7 @@ export default function Users() {
               <tr className="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
                 <th className="text-left px-4 py-3">Username</th>
                 <th className="text-left px-4 py-3">Status</th>
+                <th className="text-left px-4 py-3">Group</th>
                 <th className="text-left px-4 py-3">2FA</th>
                 <th className="text-left px-4 py-3">Quota</th>
                 <th className="text-right px-4 py-3">Actions</th>
@@ -337,6 +402,9 @@ export default function Users() {
                     {u.email && <div className="text-xs text-gray-500">{u.email}</div>}
                   </td>
                   <td className="px-4 py-3"><Badge active={u.is_active} /></td>
+                  <td className="px-4 py-3 text-gray-400 text-xs">
+                    {groupById(u.group_id) ?? <span className="text-gray-600">—</span>}
+                  </td>
                   <td className="px-4 py-3">
                     {u.otp_enabled
                       ? <span className="text-green-400 text-xs font-medium">TOTP</span>

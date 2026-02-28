@@ -354,6 +354,33 @@ load_state() {
   success "Loaded config: VPN=$VPN_PORT  Dashboard=$DASHBOARD_PORT  Host=$SERVER_HOST"
 }
 
+# ── Check for new .env keys introduced by this update ────────────────────────
+# Compares .env.example with the running .env and warns if any key is absent.
+# The API's config.py always has defaults so the service won't hard-fail, but
+# operators should know about new tuneable variables.
+check_env_keys() {
+  local EXAMPLE="$INSTALL_DIR/.env.example"
+  local ENVFILE="$INSTALL_DIR/.env"
+  [ -f "$EXAMPLE" ] && [ -f "$ENVFILE" ] || return 0
+
+  local MISSING=()
+  while IFS= read -r line; do
+    # Skip blank lines and comment lines
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    local KEY="${line%%=*}"
+    grep -q "^${KEY}=" "$ENVFILE" || MISSING+=("$KEY")
+  done < "$EXAMPLE"
+
+  if [ ${#MISSING[@]} -gt 0 ]; then
+    warn "New .env.example keys not present in your .env:"
+    for k in "${MISSING[@]}"; do
+      warn "  Missing key: $k  — see .env.example for the default/description"
+    done
+    warn "Add any required keys to $ENVFILE before the API restarts, or accept the built-in defaults."
+  fi
+}
+
 # ── Patch docker-compose ports ─────────────────────────────────────────────────
 patch_compose() {
   step "Patching docker-compose.yml with your port choices"
@@ -565,18 +592,28 @@ update() {
 
   # 4. Detect which services have changed (so we can rebuild only those)
   local CHANGED_SERVICES=()
+  local NGINX_CHANGED=false
   local CHANGED_FILES
   CHANGED_FILES=$(git diff --name-only "${CURRENT_SHA}..origin/${DEFAULT_BRANCH}" 2>/dev/null)
 
   echo "$CHANGED_FILES" | grep -q '^api/'      && CHANGED_SERVICES+=("api")
   echo "$CHANGED_FILES" | grep -q '^frontend/' && CHANGED_SERVICES+=("frontend")
   echo "$CHANGED_FILES" | grep -q '^ocserv/'   && CHANGED_SERVICES+=("ocserv")
+  # nginx uses a bind-mounted config — no image rebuild needed; restart applies changes
+  echo "$CHANGED_FILES" | grep -q '^nginx/'    && NGINX_CHANGED=true
 
   if [ ${#CHANGED_SERVICES[@]} -eq 0 ]; then
-    CHANGED_SERVICES=("api" "frontend" "ocserv")   # config-only change — rebuild all
+    if echo "$CHANGED_FILES" | grep -q '^docker-compose\.yml'; then
+      # compose file changed — could add/remove services or alter build args
+      CHANGED_SERVICES=("api" "frontend" "ocserv")
+      info "docker-compose.yml changed — rebuilding all services"
+    else
+      info "No service source changes — skipping image rebuild"
+    fi
   fi
 
-  info "Services requiring rebuild: ${CHANGED_SERVICES[*]}"
+  [ ${#CHANGED_SERVICES[@]} -gt 0 ] && info "Services requiring rebuild: ${CHANGED_SERVICES[*]}"
+  [ "$NGINX_CHANGED" = true ]        && info "nginx config changed — will reload after update"
   echo ""
 
   # 5. Confirm with user
@@ -604,6 +641,9 @@ update() {
     cp "$INSTALL_DIR/.env.bak."* "$INSTALL_DIR/.env" 2>/dev/null || \
     warn ".env missing — you may need to re-create it from .env.example"
 
+  # Check whether the update introduced new .env variables
+  check_env_keys
+
   # 10. Re-apply port patches with saved values
   step "Re-applying port configuration"
   sed -i "s|\"443:443/tcp\"|\"${VPN_PORT}:443/tcp\"|g"   docker-compose.yml
@@ -616,19 +656,27 @@ update() {
   ${DOCKER_SUDO:-} docker compose pull --quiet 2>/dev/null || true
 
   # 12. Rolling rebuild — only rebuild changed services, then restart
-  step "Rebuilding changed services: ${CHANGED_SERVICES[*]}"
-  ${DOCKER_SUDO:-} docker compose build --pull --no-cache "${CHANGED_SERVICES[@]}"
+  if [ ${#CHANGED_SERVICES[@]} -gt 0 ]; then
+    step "Rebuilding changed services: ${CHANGED_SERVICES[*]}"
+    ${DOCKER_SUDO:-} docker compose build --pull --no-cache "${CHANGED_SERVICES[@]}"
 
-  # 13. Restart changed services one at a time (keeps VPN up during api/frontend rebuild)
-  step "Restarting services with minimal downtime"
-  for SVC in "${CHANGED_SERVICES[@]}"; do
-    info "Restarting $SVC…"
-    ${DOCKER_SUDO:-} docker compose up -d --no-deps "$SVC"
-    sleep 2
-  done
+    # 13. Restart changed services one at a time (keeps VPN up during api/frontend rebuild)
+    step "Restarting services with minimal downtime"
+    for SVC in "${CHANGED_SERVICES[@]}"; do
+      info "Restarting $SVC…"
+      ${DOCKER_SUDO:-} docker compose up -d --no-deps "$SVC"
+      sleep 2
+    done
+  fi
 
   # Ensure any new services from docker-compose.yml are started too
   ${DOCKER_SUDO:-} docker compose up -d --remove-orphans
+
+  # Reload nginx if its config changed (bind-mounted — restart picks up new nginx.conf)
+  if [ "$NGINX_CHANGED" = true ]; then
+    info "Reloading nginx with updated config…"
+    ${DOCKER_SUDO:-} docker compose restart nginx
+  fi
 
   # 14. Health check
   wait_for_api

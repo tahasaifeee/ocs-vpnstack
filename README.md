@@ -1,6 +1,6 @@
 # ocs-vpnstack
 
-A self-hosted OpenConnect VPN management stack built on **ocserv**, with a full web dashboard, group-based policies, OTP/TOTP support, per-user routing, static IP assignment, GeoIP session tracking, and traffic statistics.
+A self-hosted OpenConnect VPN management stack built on **ocserv**, with a full web dashboard, group-based policies, OTP/TOTP support, per-user routing, static IP assignment, GeoIP session tracking, traffic statistics, SIEM/syslog integration, SMTP notifications, and detailed audit logging.
 
 ## One-Click Install
 
@@ -149,6 +149,8 @@ Default credentials: `admin` / `admin` — **change immediately** via Settings.
 - Set per-user DNS servers override
 - Set data quota (bytes)
 - View and edit notes
+- **Credentials panel after creation** — shows server address, username, password (click-to-reveal), OTP QR code, and VPN client download link with one-click copy-all and email-send
+- **Persistent user info modal** — click the info icon on any user row to view connection details, 2FA QR, set a new password to share, and send credentials by email
 
 ### Group Policies
 - Create groups with shared policy settings
@@ -160,7 +162,7 @@ Default credentials: `admin` / `admin` — **change immediately** via Settings.
 ### OTP / 2FA
 - Per-user TOTP for VPN login (Google Authenticator, Authy, etc.)
 - Secret generated with `pyotp`, stored in DB and written to `users.oath`
-- QR code shown at user creation time
+- QR code shown at user creation time and accessible at any time via the user info modal
 - ocserv validates OTP natively — no custom auth code
 - Admin account TOTP for dashboard login
 
@@ -189,6 +191,29 @@ Default credentials: `admin` / `admin` — **change immediately** via Settings.
 - Per-user totals: bytes in, bytes out, session count, last seen
 - Bar chart of top-10 users by traffic
 
+### Logs
+- **Auth log** — every login attempt (success and failure) with timestamp, IP, and reason
+- **Session log** — full VPN session history with duration and bandwidth
+- **Audit trail** — admin actions (user created/deleted, config changed, etc.)
+- All log views support filtering, pagination, and CSV/JSON export
+
+### Reports
+- **Daily bandwidth** — bar chart of RX+TX per day
+- **Monthly bandwidth** — bar chart of RX+TX per calendar month
+- **Top users** — bar chart + table ranked by total data transferred
+- **Login failures** — chart of failed auth attempts over time
+- **Peak hours** — 24-hour line chart showing busiest connection times
+- Configurable time window (30 / 90 / 180 / 365 days) and CSV/JSON export
+
+### Service Management
+- **Service status** — real-time ocserv status with one-click reload
+- **Config management** — validate, download, and upload `ocserv.conf` from the browser
+- **Backups** — create and restore timestamped config backups
+- **Syslog** — configure remote syslog forwarding (host, port, protocol, severity)
+- **SIEM webhook** — forward auth and session events to any HTTP endpoint (Splunk HEC, Elastic, Graylog, etc.)
+- **SMTP settings** — configure email delivery (host, port, TLS/SSL, credentials) with a built-in test button
+- **VPN Client settings** — set the canonical server address and client download URL shown in credentials panels
+
 ---
 
 ## Directory Structure
@@ -206,10 +231,12 @@ ocs-vpnstack/
 │   └── disconnect.sh       # Hook → notifies API on disconnect
 ├── api/
 │   ├── main.py             # FastAPI app entry point + DB migrations
-│   ├── models.py           # SQLAlchemy ORM models (AdminUser, VpnUser, Group, …)
+│   ├── models.py           # SQLAlchemy ORM models (AdminUser, VpnUser, Group, AuthLog, SystemSetting, …)
 │   ├── schemas.py          # Pydantic request/response schemas
 │   ├── auth.py             # JWT + bcrypt helpers
 │   ├── occtl.py            # ocpasswd/occtl wrappers, per-user config writer, GeoIP
+│   ├── mailer.py           # SMTP email delivery (smtplib, STARTTLS + SSL)
+│   ├── siem.py             # Syslog forwarding + SIEM webhook emission
 │   ├── redis_client.py     # Async Redis connection helper
 │   └── routers/
 │       ├── auth_router.py  # /auth/*
@@ -219,10 +246,13 @@ ocs-vpnstack/
 │       ├── routes_router.py# /users/{u}/routes
 │       ├── sessions.py     # /sessions/active, /users/{u}/sessions
 │       ├── stats.py        # /stats/*
+│       ├── logs.py         # /logs/* (auth, sessions, audit + exports)
+│       ├── reports.py      # /reports/* (daily, monthly, top users, failures, peak hours)
+│       ├── service.py      # /service/* (status, reload, config, backups, syslog, SIEM, SMTP)
 │       └── internal.py     # /internal/events/* (hooks only)
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/          # Login, Users, Sessions, Stats, Groups, Network, Settings
+│   │   ├── pages/          # Login, Users, Sessions, Stats, Groups, Network, Settings, Logs, Reports, Service
 │   │   ├── components/     # Layout, Sidebar
 │   │   ├── api/client.ts   # Axios API client + per-resource helpers
 │   │   ├── store/auth.ts   # Zustand auth store
@@ -237,32 +267,86 @@ ocs-vpnstack/
 
 All endpoints (except `/auth/*` and `/internal/*`) require `Authorization: Bearer <token>`.
 
-| Method   | Path                          | Description                          |
-|----------|-------------------------------|--------------------------------------|
-| POST     | `/auth/login`                 | Get access + refresh tokens          |
-| POST     | `/auth/refresh`               | Refresh access token                 |
-| GET      | `/auth/me`                    | Get current admin profile            |
-| PATCH    | `/auth/me`                    | Change admin password / username     |
-| POST     | `/auth/totp/setup`            | Generate admin TOTP secret + QR      |
-| POST     | `/auth/totp/enable`           | Confirm and activate admin TOTP      |
-| POST     | `/auth/totp/disable`          | Disable admin TOTP                   |
-| GET      | `/users`                      | List all VPN users                   |
-| POST     | `/users`                      | Create user                          |
-| PATCH    | `/users/{u}`                  | Update user (password, group, IP, …) |
-| DELETE   | `/users/{u}`                  | Delete user                          |
-| POST     | `/users/{u}/disconnect`       | Kick active session                  |
-| GET      | `/users/{u}/otp-qr`           | Get OTP QR data URL                  |
-| GET/PUT  | `/users/{u}/routes`           | Get / replace route list             |
-| GET      | `/groups`                     | List all groups                      |
-| POST     | `/groups`                     | Create group                         |
-| PATCH    | `/groups/{id}`                | Update group (regenerates configs)   |
-| DELETE   | `/groups/{id}`                | Delete group                         |
-| GET      | `/network`                    | Get current ocserv network settings  |
-| PUT      | `/network`                    | Update network settings + reload     |
-| GET      | `/sessions/active`            | Live sessions with GeoIP from occtl  |
-| GET      | `/users/{u}/sessions`         | Session history                      |
-| GET      | `/stats/users`                | Traffic stats for all users          |
-| GET      | `/stats/users/{u}`            | Stats for one user                   |
+### Auth
+
+| Method | Path                  | Description                        |
+|--------|-----------------------|------------------------------------|
+| POST   | `/auth/login`         | Get access + refresh tokens        |
+| POST   | `/auth/refresh`       | Refresh access token               |
+| GET    | `/auth/me`            | Get current admin profile          |
+| PATCH  | `/auth/me`            | Change admin password / username   |
+| POST   | `/auth/totp/setup`    | Generate admin TOTP secret + QR    |
+| POST   | `/auth/totp/enable`   | Confirm and activate admin TOTP    |
+| POST   | `/auth/totp/disable`  | Disable admin TOTP                 |
+
+### Users
+
+| Method   | Path                              | Description                           |
+|----------|-----------------------------------|---------------------------------------|
+| GET      | `/users`                          | List all VPN users                    |
+| POST     | `/users`                          | Create user                           |
+| PATCH    | `/users/{u}`                      | Update user (password, group, IP, …)  |
+| DELETE   | `/users/{u}`                      | Delete user                           |
+| POST     | `/users/{u}/disconnect`           | Kick active session                   |
+| GET      | `/users/{u}/otp-qr`               | Get OTP QR data URL                   |
+| GET/PUT  | `/users/{u}/routes`               | Get / replace route list              |
+| POST     | `/users/{u}/send-credentials`     | Email VPN credentials to user         |
+
+### Groups / Network / Sessions / Stats
+
+| Method   | Path                       | Description                                    |
+|----------|----------------------------|------------------------------------------------|
+| GET      | `/groups`                  | List all groups                                |
+| POST     | `/groups`                  | Create group                                   |
+| PATCH    | `/groups/{id}`             | Update group (regenerates configs)             |
+| DELETE   | `/groups/{id}`             | Delete group                                   |
+| GET      | `/network`                 | Get current ocserv network settings            |
+| PUT      | `/network`                 | Update network settings + reload               |
+| GET      | `/sessions/active`         | Live sessions with GeoIP from occtl            |
+| GET      | `/users/{u}/sessions`      | Session history                                |
+| GET      | `/stats/users`             | Traffic stats for all users                    |
+| GET      | `/stats/users/{u}`         | Stats for one user                             |
+
+### Logs
+
+| Method | Path                          | Description                                    |
+|--------|-------------------------------|------------------------------------------------|
+| GET    | `/logs/auth`                  | Auth log (paginated, filterable)               |
+| GET    | `/logs/auth/export`           | Export auth log (CSV or JSON)                  |
+| GET    | `/logs/sessions`              | Session log (paginated, filterable)            |
+| GET    | `/logs/sessions/export`       | Export session log                             |
+| GET    | `/logs/audit`                 | Audit trail (paginated, filterable)            |
+| GET    | `/logs/audit/export`          | Export audit trail                             |
+
+### Reports
+
+| Method | Path                    | Description                                         |
+|--------|-------------------------|-----------------------------------------------------|
+| GET    | `/reports/daily`        | Daily bandwidth (RX + TX per day)                   |
+| GET    | `/reports/monthly`      | Monthly bandwidth                                   |
+| GET    | `/reports/top-users`    | Top users by total data transferred                 |
+| GET    | `/reports/login-failures` | Failed auth attempts over time                    |
+| GET    | `/reports/peak-hours`   | Connections by hour of day (0–23)                   |
+| GET    | `/reports/export`       | Export any report as CSV or JSON                    |
+
+### Service
+
+| Method   | Path                       | Description                                    |
+|----------|----------------------------|------------------------------------------------|
+| GET      | `/service/status`          | ocserv service status                          |
+| POST     | `/service/reload`          | Reload ocserv config (occtl reload)            |
+| GET      | `/service/config`          | Download current ocserv.conf                   |
+| PUT      | `/service/config`          | Upload and apply a new ocserv.conf             |
+| POST     | `/service/config/validate` | Validate an ocserv.conf without applying       |
+| GET      | `/service/backups`         | List config backups                            |
+| POST     | `/service/backups`         | Create a new backup                            |
+| POST     | `/service/backups/{name}/restore` | Restore a backup                      |
+| GET/PUT  | `/service/syslog`          | Get / update syslog forwarding settings        |
+| GET/PUT  | `/service/siem`            | Get / update SIEM webhook settings             |
+| POST     | `/service/siem/test`       | Send a test event to the SIEM webhook          |
+| GET/PUT  | `/service/smtp`            | Get / update SMTP email settings               |
+| POST     | `/service/smtp/test`       | Send a test email                              |
+| GET/PUT  | `/service/vpn-client`      | Get / update VPN client settings (server addr, download URL) |
 
 ## Security Notes
 
@@ -272,3 +356,4 @@ All endpoints (except `/auth/*` and `/internal/*`) require `Authorization: Beare
 - The `/internal/*` endpoints have no JWT auth — they rely on Docker network isolation
 - The VPN listens on port 443 (TCP+UDP) for maximum compatibility with restrictive firewalls
 - Dashboard is on port 8443 to avoid conflict with the VPN port
+- User passwords are stored as bcrypt hashes in ocpasswd and are never retrievable — use the user info modal to set a fresh password when sharing credentials with a user

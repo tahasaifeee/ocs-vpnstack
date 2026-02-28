@@ -178,6 +178,10 @@ setup_repo() {
   else
     info "Cloning repository to $INSTALL_DIR"
     sudo mkdir -p "$(dirname "$INSTALL_DIR")"
+    # Move to a guaranteed-valid directory before cloning; the caller's cwd
+    # may be a deleted path (e.g. right after --uninstall) which causes git
+    # to fail with "Unable to read current working directory".
+    cd /tmp
     if [ "$EUID" -ne 0 ]; then
       sudo git clone "$REPO_URL" "$INSTALL_DIR"
       sudo chown -R "$USER:$USER" "$INSTALL_DIR"
@@ -664,8 +668,12 @@ uninstall() {
   [ "$CONFIRM" = "yes" ] || { info "Aborted."; exit 0; }
   cd "$INSTALL_DIR"
   ${DOCKER_SUDO:-} docker compose down -v --remove-orphans
+  # Step out before deleting — otherwise the shell's cwd becomes a ghost
+  # directory and any subsequent command (including a fresh reinstall) will
+  # fail with "getcwd: cannot access parent directories".
+  cd /
   sudo rm -rf "$INSTALL_DIR"
-  success "Uninstalled. Goodbye!"
+  success "Uninstalled. Re-install with: bash <(curl -fsSL ${REPO_URL}/raw/master/setup.sh)"
   exit 0
 }
 

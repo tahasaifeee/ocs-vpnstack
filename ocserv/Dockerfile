@@ -1,14 +1,14 @@
-FROM alpine:3.19
+FROM debian:bookworm-slim
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ocserv \
-    gnutls-utils \
+    gnutls-bin \
     iptables \
-    bash \
     iproute2 \
-    oath-toolkit-oathtool \
+    oathtool \
     ca-certificates \
-    tzdata
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /etc/ocserv/conf.d /etc/ocserv/user-routes /var/log/ocserv /run/ocserv
 

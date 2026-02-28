@@ -108,3 +108,60 @@ export const networkApi = {
   get: () => api.get('/network').then((r) => r.data),
   update: (data: unknown) => api.put('/network', data).then((r) => r.data),
 }
+
+// ── Logs ──────────────────────────────────────────────────────────────────────
+
+export const logsApi = {
+  authLogs: (params?: Record<string, unknown>) =>
+    api.get('/logs/auth', { params }).then((r) => r.data),
+  exportAuthLogs: (format: 'csv' | 'json', params?: Record<string, unknown>) =>
+    api.get('/logs/auth/export', { params: { ...params, format }, responseType: 'blob' }),
+  sessionLogs: (params?: Record<string, unknown>) =>
+    api.get('/logs/sessions', { params }).then((r) => r.data),
+  exportSessionLogs: (format: 'csv' | 'json', params?: Record<string, unknown>) =>
+    api.get('/logs/sessions/export', { params: { ...params, format }, responseType: 'blob' }),
+  auditLogs: (params?: Record<string, unknown>) =>
+    api.get('/logs/audit', { params }).then((r) => r.data),
+  exportAuditLogs: (format: 'csv' | 'json', params?: Record<string, unknown>) =>
+    api.get('/logs/audit/export', { params: { ...params, format }, responseType: 'blob' }),
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+export const reportsApi = {
+  daily: (days = 30) =>
+    api.get('/reports/daily', { params: { days } }).then((r) => r.data),
+  monthly: (months = 12) =>
+    api.get('/reports/monthly', { params: { months } }).then((r) => r.data),
+  topUsers: (limit = 10, days = 30) =>
+    api.get('/reports/top-users', { params: { limit, days } }).then((r) => r.data),
+  loginFailures: (days = 30, limit = 10) =>
+    api.get('/reports/login-failures', { params: { days, limit } }).then((r) => r.data),
+  peakHours: (days = 30) =>
+    api.get('/reports/peak-hours', { params: { days } }).then((r) => r.data),
+  export: (report_type: string, format: 'csv' | 'json', params?: Record<string, unknown>) =>
+    api.get('/reports/export', { params: { report_type, format, ...params }, responseType: 'blob' }),
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+export const serviceApi = {
+  status: () => api.get('/service/status').then((r) => r.data),
+  reload: () => api.post('/service/reload').then((r) => r.data),
+  validate: () => api.get('/service/validate').then((r) => r.data),
+  downloadConfig: () => api.get('/service/config/download', { responseType: 'blob' }),
+  uploadConfig: (file: File, apply = false) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post(`/service/config/upload?apply=${apply}`, fd).then((r) => r.data)
+  },
+  backups: () => api.get('/service/config/backups').then((r) => r.data),
+  createBackup: () => api.post('/service/config/backup').then((r) => r.data),
+  restoreBackup: (filename: string) =>
+    api.post(`/service/config/backups/${encodeURIComponent(filename)}/restore`).then((r) => r.data),
+  getSyslog: () => api.get('/service/syslog').then((r) => r.data),
+  putSyslog: (data: unknown) => api.put('/service/syslog', data).then((r) => r.data),
+  getSiem: () => api.get('/service/siem').then((r) => r.data),
+  putSiem: (data: unknown) => api.put('/service/siem', data).then((r) => r.data),
+  testSiem: () => api.post('/service/siem/test').then((r) => r.data),
+}

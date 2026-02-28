@@ -3,7 +3,7 @@ import io
 
 import pyotp
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,7 @@ from auth import (
     verify_password,
 )
 from database import get_db
-from models import AdminUser
+from models import AdminUser, AuthLog
 from schemas import (
     AdminUpdateRequest,
     LoginRequest,
@@ -27,6 +27,7 @@ from schemas import (
     TotpEnableRequest,
     TotpSetupResponse,
 )
+import siem
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -34,12 +35,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # ── Login ──────────────────────────────────────────────────────────────────────
 
 @router.post("/login")
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    ip = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or (
+        request.client.host if request.client else None
+    )
+
     result = await db.execute(select(AdminUser).where(AdminUser.username == body.username))
     admin = result.scalar_one_or_none()
+
     if not admin or not verify_password(body.password, admin.hashed_password):
+        db.add(AuthLog(username=body.username, ip_address=ip, success=False, failure_reason="bad_credentials"))
+        await db.commit()
+        siem.log_auth_event(body.username, ip, success=False, reason="bad_credentials")
+        await siem.emit_auth_siem(body.username, ip, success=False, reason="bad_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad credentials")
+
     if not admin.is_active:
+        db.add(AuthLog(username=body.username, ip_address=ip, success=False, failure_reason="account_disabled"))
+        await db.commit()
+        siem.log_auth_event(body.username, ip, success=False, reason="account_disabled")
+        await siem.emit_auth_siem(body.username, ip, success=False, reason="account_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
     # 2FA gate: if enabled, require a TOTP code
@@ -49,7 +64,16 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             return JSONResponse(status_code=200, content={"requires_totp": True})
         if not admin.totp_secret or \
                 not pyotp.TOTP(admin.totp_secret).verify(body.totp_code, valid_window=1):
+            db.add(AuthLog(username=body.username, ip_address=ip, success=False, failure_reason="bad_totp"))
+            await db.commit()
+            siem.log_auth_event(body.username, ip, success=False, reason="bad_totp")
+            await siem.emit_auth_siem(body.username, ip, success=False, reason="bad_totp")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid 2FA code")
+
+    db.add(AuthLog(username=body.username, ip_address=ip, success=True))
+    await db.commit()
+    siem.log_auth_event(body.username, ip, success=True)
+    await siem.emit_auth_siem(body.username, ip, success=True)
 
     return TokenResponse(
         access_token=create_access_token(admin.username),

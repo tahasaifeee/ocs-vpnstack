@@ -1,6 +1,6 @@
 # ocs-vpnstack
 
-A self-hosted OpenConnect VPN management stack built on **ocserv**, with a full web dashboard, OTP/TOTP support, per-user routing, and traffic statistics.
+A self-hosted OpenConnect VPN management stack built on **ocserv**, with a full web dashboard, group-based policies, OTP/TOTP support, per-user routing, static IP assignment, GeoIP session tracking, and traffic statistics.
 
 ## One-Click Install
 
@@ -75,8 +75,8 @@ bash /opt/ocs-vpnstack/setup.sh --help
 ```
 [Web Dashboard (React + Vite + TailwindCSS)]
                 ↕ REST API (/api/*)
-[Backend API — FastAPI]
-                ↕ subprocess (ocpasswd / occtl)
+[Backend API — FastAPI + PostgreSQL + Redis]
+                ↕ subprocess (ocpasswd / occtl / ocserv.conf)
 [ocserv — OpenConnect VPN]
                 ↕ TLS/DTLS
 [VPN Clients]
@@ -84,14 +84,14 @@ bash /opt/ocs-vpnstack/setup.sh --help
 
 ## Services (Docker Compose)
 
-| Service    | Image / Build  | Purpose                                     |
-|------------|----------------|---------------------------------------------|
-| `ocserv`   | ./ocserv       | OpenConnect VPN daemon                      |
-| `api`      | ./api          | FastAPI — user CRUD, OTP, routes, stats     |
-| `frontend` | ./frontend     | React SPA dashboard                         |
-| `postgres` | postgres:16    | User metadata, session logs, audit trail    |
-| `redis`    | redis:7        | Session cache, rate-limiting                |
-| `nginx`    | nginx:alpine   | Reverse proxy + TLS termination             |
+| Service    | Image / Build  | Purpose                                                    |
+|------------|----------------|------------------------------------------------------------|
+| `ocserv`   | ./ocserv       | OpenConnect VPN daemon                                     |
+| `api`      | ./api          | FastAPI — user/group CRUD, OTP, routes, stats, network     |
+| `frontend` | ./frontend     | React SPA dashboard                                        |
+| `postgres` | postgres:16    | User metadata, groups, session logs, audit trail           |
+| `redis`    | redis:7        | GeoIP cache (24 h TTL), session cache, rate-limiting       |
+| `nginx`    | nginx:alpine   | Reverse proxy + TLS termination                            |
 
 ## Quick Start
 
@@ -134,7 +134,7 @@ docker compose up -d --build
 
 Open **https://\<your-host\>:8443** in a browser.
 
-Default credentials: `admin` / `admin` — **change immediately** via the Users page.
+Default credentials: `admin` / `admin` — **change immediately** via Settings.
 
 ---
 
@@ -143,25 +143,46 @@ Default credentials: `admin` / `admin` — **change immediately** via the Users 
 ### User Management
 - Create / edit / delete VPN users
 - Enable / disable accounts (ocpasswd lock/unlock)
-- Set data quotas
+- Assign users to groups (inherits group policies)
+- Set static VPN IP per user (overrides dynamic pool)
+- Set per-user max concurrent sessions override
+- Set per-user DNS servers override
+- Set data quota (bytes)
 - View and edit notes
 
+### Group Policies
+- Create groups with shared policy settings
+- Per-group: max concurrent sessions, data quota, DNS servers, session timeout
+- Split-tunnel mode toggle (push specific routes vs. full tunnel)
+- Editing a group immediately regenerates per-user ocserv config files for all members
+- Users without a group use the global ocserv.conf defaults
+
 ### OTP / 2FA
-- Per-user TOTP (Google Authenticator, Authy, etc.)
+- Per-user TOTP for VPN login (Google Authenticator, Authy, etc.)
 - Secret generated with `pyotp`, stored in DB and written to `users.oath`
-- QR code shown at creation time
+- QR code shown at user creation time
 - ocserv validates OTP natively — no custom auth code
+- Admin account TOTP for dashboard login
 
 ### Per-User Routes
-- Assign CIDR ranges that get pushed to each client
-- Mark routes as `no-route` (excluded)
+- Assign CIDR ranges pushed to each client on connect
+- Mark routes as `no-route` (excluded / split-tunnel)
 - Changes take effect immediately via `occtl reload` — no restart needed
 - Config written to `/etc/ocserv/user-routes/<username>.conf`
 
+### Network Settings
+- Edit VPN IP pool (CIDR + netmask) from the dashboard
+- Configure global DNS servers pushed to all clients
+- Toggle `tunnel-all-dns`
+- Enable / disable IPv6 and set IPv6 network CIDR
+- Configure global max clients and max same-user sessions
+- Settings written directly to `ocserv.conf` and applied with `occtl reload`
+
 ### Live Sessions
 - Active sessions polled from `occtl show users` every 30 seconds
-- Kick any user from the dashboard
-- RX / TX displayed per session
+- Per session: username, public IP, **GeoIP location** (country flag + city), VPN IP, device/OS, connect time, RX/TX bytes
+- Force-disconnect any user from the dashboard
+- GeoIP resolved via ip-api.com with 24-hour Redis cache to avoid rate limits
 
 ### Traffic Statistics
 - Historical session log stored in PostgreSQL via connect/disconnect hooks
@@ -174,32 +195,36 @@ Default credentials: `admin` / `admin` — **change immediately** via the Users 
 
 ```
 ocs-vpnstack/
-├── setup.sh            # One-click installer (run via curl | bash)
+├── setup.sh                # One-click installer (run via curl | bash)
 ├── docker-compose.yml
 ├── .env.example
 ├── ocserv/
-│   ├── Dockerfile          # Alpine + ocserv + gnutls-utils
-│   ├── ocserv.conf         # Main VPN config
-│   ├── connect.sh          # Hook -> notifies API on connect
-│   └── disconnect.sh       # Hook -> notifies API on disconnect
+│   ├── Dockerfile
+│   ├── ocserv.conf         # Default VPN config (preserved on restart if modified)
+│   ├── entrypoint.sh       # Cert generation + config bootstrap
+│   ├── connect.sh          # Hook → notifies API on connect
+│   └── disconnect.sh       # Hook → notifies API on disconnect
 ├── api/
-│   ├── main.py             # FastAPI app entry point
-│   ├── models.py           # SQLAlchemy ORM models
+│   ├── main.py             # FastAPI app entry point + DB migrations
+│   ├── models.py           # SQLAlchemy ORM models (AdminUser, VpnUser, Group, …)
 │   ├── schemas.py          # Pydantic request/response schemas
 │   ├── auth.py             # JWT + bcrypt helpers
-│   ├── occtl.py            # Async wrappers for ocpasswd/occtl/files
+│   ├── occtl.py            # ocpasswd/occtl wrappers, per-user config writer, GeoIP
+│   ├── redis_client.py     # Async Redis connection helper
 │   └── routers/
 │       ├── auth_router.py  # /auth/*
 │       ├── users.py        # /users/*
+│       ├── groups.py       # /groups/*
+│       ├── network.py      # /network
 │       ├── routes_router.py# /users/{u}/routes
 │       ├── sessions.py     # /sessions/active, /users/{u}/sessions
 │       ├── stats.py        # /stats/*
 │       └── internal.py     # /internal/events/* (hooks only)
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/          # Login, Users, Sessions, Stats
+│   │   ├── pages/          # Login, Users, Sessions, Stats, Groups, Network, Settings
 │   │   ├── components/     # Layout, Sidebar
-│   │   ├── api/client.ts   # Axios API client
+│   │   ├── api/client.ts   # Axios API client + per-resource helpers
 │   │   ├── store/auth.ts   # Zustand auth store
 │   │   └── types/          # Shared TypeScript types
 │   └── ...
@@ -212,25 +237,37 @@ ocs-vpnstack/
 
 All endpoints (except `/auth/*` and `/internal/*`) require `Authorization: Bearer <token>`.
 
-| Method | Path                          | Description                     |
-|--------|-------------------------------|---------------------------------|
-| POST   | `/auth/login`                 | Get access + refresh tokens     |
-| POST   | `/auth/refresh`               | Refresh access token            |
-| GET    | `/users`                      | List all VPN users              |
-| POST   | `/users`                      | Create user                     |
-| PATCH  | `/users/{u}`                  | Update user                     |
-| DELETE | `/users/{u}`                  | Delete user                     |
-| POST   | `/users/{u}/disconnect`       | Kick active session             |
-| GET    | `/users/{u}/otp-qr`           | Get OTP QR data URL             |
-| GET/PUT| `/users/{u}/routes`           | Get / replace route list        |
-| GET    | `/sessions/active`            | Live sessions from occtl        |
-| GET    | `/users/{u}/sessions`         | Session history                 |
-| GET    | `/stats/users`                | Traffic stats for all users     |
-| GET    | `/stats/users/{u}`            | Stats for one user              |
+| Method   | Path                          | Description                          |
+|----------|-------------------------------|--------------------------------------|
+| POST     | `/auth/login`                 | Get access + refresh tokens          |
+| POST     | `/auth/refresh`               | Refresh access token                 |
+| GET      | `/auth/me`                    | Get current admin profile            |
+| PATCH    | `/auth/me`                    | Change admin password / username     |
+| POST     | `/auth/totp/setup`            | Generate admin TOTP secret + QR      |
+| POST     | `/auth/totp/enable`           | Confirm and activate admin TOTP      |
+| POST     | `/auth/totp/disable`          | Disable admin TOTP                   |
+| GET      | `/users`                      | List all VPN users                   |
+| POST     | `/users`                      | Create user                          |
+| PATCH    | `/users/{u}`                  | Update user (password, group, IP, …) |
+| DELETE   | `/users/{u}`                  | Delete user                          |
+| POST     | `/users/{u}/disconnect`       | Kick active session                  |
+| GET      | `/users/{u}/otp-qr`           | Get OTP QR data URL                  |
+| GET/PUT  | `/users/{u}/routes`           | Get / replace route list             |
+| GET      | `/groups`                     | List all groups                      |
+| POST     | `/groups`                     | Create group                         |
+| PATCH    | `/groups/{id}`                | Update group (regenerates configs)   |
+| DELETE   | `/groups/{id}`                | Delete group                         |
+| GET      | `/network`                    | Get current ocserv network settings  |
+| PUT      | `/network`                    | Update network settings + reload     |
+| GET      | `/sessions/active`            | Live sessions with GeoIP from occtl  |
+| GET      | `/users/{u}/sessions`         | Session history                      |
+| GET      | `/stats/users`                | Traffic stats for all users          |
+| GET      | `/stats/users/{u}`            | Stats for one user                   |
 
 ## Security Notes
 
 - Change default admin credentials immediately after first login
+- Enable admin TOTP (Settings → Two-Factor Authentication) for an extra layer of protection
 - Restrict `ALLOWED_ORIGINS` in `.env` to your domain in production
 - The `/internal/*` endpoints have no JWT auth — they rely on Docker network isolation
 - The VPN listens on port 443 (TCP+UDP) for maximum compatibility with restrictive firewalls

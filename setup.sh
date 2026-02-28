@@ -331,7 +331,7 @@ SAVED_DASHBOARD_PORT=${DASHBOARD_PORT}
 SAVED_SERVER_HOST=${SERVER_HOST}
 SAVED_TLS_CHOICE=${TLS_CHOICE}
 SAVED_VPN_SUBNET=${VPN_SUBNET}
-INSTALL_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+INSTALL_DATE="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 STATE
   success "Install state saved to $STATE_FILE"
 }
@@ -581,7 +581,7 @@ update() {
   wait_for_api
 
   # 15. Update state file with latest commit
-  echo "LAST_UPDATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$STATE_FILE"
+  echo "LAST_UPDATE=\"$(date -u '+%Y-%m-%d %H:%M:%S UTC')\"" >> "$STATE_FILE"
   echo "LAST_COMMIT=$(git rev-parse --short HEAD)"        >> "$STATE_FILE"
 
   show_update_summary

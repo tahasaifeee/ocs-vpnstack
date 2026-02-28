@@ -1,0 +1,25 @@
+# Environment secrets
+.env
+
+# TLS certificates (generate locally, never commit)
+nginx/certs/*.crt
+nginx/certs/*.key
+nginx/certs/*.pem
+ocserv/*.crt
+ocserv/*.key
+ocserv/*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# Misc
+*.log
+.DS_Store

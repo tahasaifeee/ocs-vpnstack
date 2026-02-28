@@ -445,6 +445,7 @@ show_summary() {
   echo -e "  ${BOLD}Manage services${RESET}"
   echo -e "  ${INSTALL_DIR}/setup.sh --update     ${CYAN}# pull latest code & rebuild${RESET}"
   echo -e "  ${INSTALL_DIR}/setup.sh --status     ${CYAN}# health + recent logs${RESET}"
+  echo -e "  ${INSTALL_DIR}/setup.sh --diagnose   ${CYAN}# full diagnostic (ports, DB, TLS, disk)${RESET}"
   echo -e "  ${INSTALL_DIR}/setup.sh --rebuild    ${CYAN}# force full image rebuild${RESET}"
   echo -e "  ${INSTALL_DIR}/setup.sh --uninstall  ${CYAN}# remove everything${RESET}"
   echo ""
@@ -584,6 +585,7 @@ update() {
   echo "LAST_UPDATE=\"$(date -u '+%Y-%m-%d %H:%M:%S UTC')\"" >> "$STATE_FILE"
   echo "LAST_COMMIT=$(git rev-parse --short HEAD)"        >> "$STATE_FILE"
 
+  check_docker_health || true
   show_update_summary
 }
 
@@ -604,6 +606,7 @@ rebuild() {
   ${DOCKER_SUDO:-} docker compose up -d --remove-orphans
 
   wait_for_api
+  check_docker_health || true
   success "Rebuild complete — running commit $(git rev-parse --short HEAD)"
 }
 
@@ -647,6 +650,7 @@ show_update_summary() {
   echo -e "  ${BOLD}Useful commands${RESET}"
   echo -e "  ${INSTALL_DIR}/setup.sh --update    # update again next time"
   echo -e "  ${INSTALL_DIR}/setup.sh --status    # check service health"
+  echo -e "  ${INSTALL_DIR}/setup.sh --diagnose  # full diagnostic"
   echo -e "  ${INSTALL_DIR}/setup.sh --rebuild   # force full image rebuild"
   echo -e "  cd ${INSTALL_DIR} && docker compose logs -f api"
   echo ""
@@ -663,6 +667,304 @@ uninstall() {
   sudo rm -rf "$INSTALL_DIR"
   success "Uninstalled. Goodbye!"
   exit 0
+}
+
+# ── Docker Health Check ───────────────────────────────────────────────────────
+# Called after every start_services / update / rebuild.
+# Prints a status table; for any container that is not running+healthy it
+# dumps the last 60 log lines so the operator knows exactly what went wrong.
+check_docker_health() {
+  step "Docker container health check"
+  cd "$INSTALL_DIR"
+
+  # Give containers a moment to settle after a compose up
+  sleep 3
+
+  local ALL_GOOD=true
+  local FAILED_SVCS=()
+
+  # Collect the list of services defined in this compose project
+  local SERVICES
+  SERVICES=$(${DOCKER_SUDO:-} docker compose ps --services 2>/dev/null || true)
+
+  if [ -z "$SERVICES" ]; then
+    warn "No services found in $INSTALL_DIR — is docker-compose.yml present?"
+    return 1
+  fi
+
+  echo ""
+  printf "  ${BOLD}%-20s %-14s %-12s${RESET}\n" "SERVICE" "STATE" "HEALTH"
+  printf "  %-20s %-14s %-12s\n" "────────────────────" "──────────────" "────────────"
+
+  while IFS= read -r svc; do
+    [ -z "$svc" ] && continue
+
+    local STATE HEALTH
+    # --format flag supported by Compose v2 (json fallback for older)
+    STATE=$(${DOCKER_SUDO:-} docker compose ps --format '{{.State}}' "$svc" 2>/dev/null \
+            | head -1 || true)
+    HEALTH=$(${DOCKER_SUDO:-} docker compose ps --format '{{.Health}}' "$svc" 2>/dev/null \
+             | head -1 || true)
+    STATE="${STATE:-unknown}"
+    HEALTH="${HEALTH:--}"
+
+    local COLOR
+    if [ "$STATE" = "running" ] && [ "$HEALTH" != "unhealthy" ]; then
+      COLOR="${GREEN}"
+    elif [ "$STATE" = "running" ] && [ "$HEALTH" = "unhealthy" ]; then
+      COLOR="${YELLOW}"
+      FAILED_SVCS+=("$svc")
+      ALL_GOOD=false
+    else
+      COLOR="${RED}"
+      FAILED_SVCS+=("$svc")
+      ALL_GOOD=false
+    fi
+
+    printf "  ${COLOR}%-20s %-14s %-12s${RESET}\n" "$svc" "$STATE" "$HEALTH"
+  done <<< "$SERVICES"
+
+  echo ""
+
+  if [ "$ALL_GOOD" = true ]; then
+    success "All containers are running and healthy"
+    return 0
+  fi
+
+  echo -e "${YELLOW}[WARN]${RESET}  ${#FAILED_SVCS[@]} container(s) are not healthy: ${BOLD}${FAILED_SVCS[*]}${RESET}"
+  echo ""
+
+  for svc in "${FAILED_SVCS[@]}"; do
+    echo -e "${BOLD}${RED}┌── Logs: $svc $(printf '─%.0s' {1..50})${RESET}"
+    ${DOCKER_SUDO:-} docker compose logs --tail=60 --no-log-prefix --timestamps "$svc" 2>&1 \
+      | sed 's/^/│ /' || true
+    echo -e "${BOLD}${RED}└$(printf '─%.0s' {1..58})${RESET}"
+    echo ""
+  done
+
+  warn "Tip: run  '${INSTALL_DIR}/setup.sh --diagnose'  for a full system check"
+  return 1
+}
+
+# ── Full Diagnostic ───────────────────────────────────────────────────────────
+diagnose() {
+  step "ocs-vpnstack — Full System Diagnostic"
+  local ISSUES=0
+
+  # ── 1. Environment ──────────────────────────────────────────────────────────
+  echo -e "\n${BOLD}[1/8] Environment${RESET}"
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    info "OS          : $PRETTY_NAME"
+  fi
+  info "Kernel      : $(uname -r)"
+  info "Install dir : $INSTALL_DIR"
+  info "Script date : $(stat -c '%y' "${BASH_SOURCE[0]}" 2>/dev/null | cut -d' ' -f1 || echo 'unknown')"
+
+  if docker --version &>/dev/null; then
+    info "Docker      : $(docker --version | awk '{print $3}' | tr -d ',')"
+  else
+    echo -e "${RED}[ERROR]${RESET} Docker not found"; ISSUES=$((ISSUES+1))
+  fi
+  if docker compose version &>/dev/null; then
+    info "Compose     : $(docker compose version --short 2>/dev/null || docker compose version)"
+  else
+    echo -e "${RED}[ERROR]${RESET} Docker Compose not found"; ISSUES=$((ISSUES+1))
+  fi
+
+  # ── 2. State & Config files ─────────────────────────────────────────────────
+  echo -e "\n${BOLD}[2/8] Configuration files${RESET}"
+  if [ -f "$STATE_FILE" ]; then
+    success ".setup-state found"
+    . "$STATE_FILE"
+    info "  VPN port   : ${SAVED_VPN_PORT:-?}"
+    info "  Dashboard  : ${SAVED_DASHBOARD_PORT:-?}"
+    info "  Host       : ${SAVED_SERVER_HOST:-?}"
+    info "  Installed  : ${INSTALL_DATE:-?}"
+    VPN_PORT="${SAVED_VPN_PORT:-443}"
+    DASHBOARD_PORT="${SAVED_DASHBOARD_PORT:-8443}"
+    SERVER_HOST="${SAVED_SERVER_HOST:-localhost}"
+  else
+    warn ".setup-state missing — port info unavailable"; ISSUES=$((ISSUES+1))
+    VPN_PORT=443; DASHBOARD_PORT=8443; SERVER_HOST="localhost"
+  fi
+
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    success ".env found"
+    # Check required keys
+    for KEY in POSTGRES_PASSWORD SECRET_KEY; do
+      if grep -q "^${KEY}=" "$INSTALL_DIR/.env"; then
+        success "  $KEY present"
+      else
+        warn "  $KEY MISSING from .env"; ISSUES=$((ISSUES+1))
+      fi
+    done
+  else
+    echo -e "${RED}[ERROR]${RESET} .env missing — services cannot start"; ISSUES=$((ISSUES+1))
+  fi
+
+  # ── 3. Container status ─────────────────────────────────────────────────────
+  echo -e "\n${BOLD}[3/8] Container status${RESET}"
+  if [ -d "$INSTALL_DIR" ]; then
+    cd "$INSTALL_DIR"
+    local SERVICES
+    SERVICES=$(${DOCKER_SUDO:-} docker compose ps --services 2>/dev/null || true)
+    if [ -z "$SERVICES" ]; then
+      warn "No services running"; ISSUES=$((ISSUES+1))
+    else
+      local FAILED_SVCS=()
+      printf "  ${BOLD}%-20s %-14s %-12s %-6s${RESET}\n" "SERVICE" "STATE" "HEALTH" "RESTARTS"
+      printf "  %-20s %-14s %-12s %-6s\n" "────────────────────" "──────────────" "────────────" "────────"
+      while IFS= read -r svc; do
+        [ -z "$svc" ] && continue
+        local STATE HEALTH RESTARTS
+        STATE=$(${DOCKER_SUDO:-} docker compose ps --format '{{.State}}'    "$svc" 2>/dev/null | head -1 || true)
+        HEALTH=$(${DOCKER_SUDO:-} docker compose ps --format '{{.Health}}'   "$svc" 2>/dev/null | head -1 || true)
+        # Restart count from docker inspect
+        local CID
+        CID=$(${DOCKER_SUDO:-} docker compose ps -q "$svc" 2>/dev/null | head -1 || true)
+        RESTARTS="-"
+        if [ -n "$CID" ]; then
+          RESTARTS=$(docker inspect --format '{{.RestartCount}}' "$CID" 2>/dev/null || echo "-")
+        fi
+        STATE="${STATE:-unknown}"; HEALTH="${HEALTH:--}"
+        local COLOR
+        if [ "$STATE" = "running" ] && [ "$HEALTH" != "unhealthy" ]; then
+          COLOR="${GREEN}"
+        else
+          COLOR="${RED}"; FAILED_SVCS+=("$svc"); ISSUES=$((ISSUES+1))
+        fi
+        printf "  ${COLOR}%-20s %-14s %-12s %-6s${RESET}\n" "$svc" "$STATE" "$HEALTH" "$RESTARTS"
+      done <<< "$SERVICES"
+      echo ""
+
+      # Show logs for failed containers
+      if [ ${#FAILED_SVCS[@]} -gt 0 ]; then
+        warn "Failed/unhealthy: ${FAILED_SVCS[*]}"
+        for svc in "${FAILED_SVCS[@]}"; do
+          echo -e "\n${BOLD}${RED}┌── Last 60 log lines: $svc${RESET}"
+          ${DOCKER_SUDO:-} docker compose logs --tail=60 --no-log-prefix --timestamps "$svc" 2>&1 \
+            | sed 's/^/│ /' || true
+          echo -e "${BOLD}${RED}└$(printf '─%.0s' {1..58})${RESET}"
+        done
+      fi
+    fi
+  else
+    warn "Install dir $INSTALL_DIR not found"; ISSUES=$((ISSUES+1))
+  fi
+
+  # ── 4. Port availability ────────────────────────────────────────────────────
+  echo -e "\n${BOLD}[4/8] Port listeners${RESET}"
+  local CHECK_PORTS=("${VPN_PORT}:VPN(tcp)" "${VPN_PORT}:VPN(udp)" "${DASHBOARD_PORT}:Dashboard" "8000:API-internal")
+  for ENTRY in "${CHECK_PORTS[@]}"; do
+    local PORT LABEL
+    PORT="${ENTRY%%:*}"; LABEL="${ENTRY#*:}"
+    if ss -tlnup 2>/dev/null | grep -q ":${PORT} \|:${PORT}$" || \
+       netstat -tlnup 2>/dev/null | grep -q ":${PORT} "; then
+      success "$LABEL  port $PORT is listening"
+    else
+      warn "$LABEL  port $PORT — nothing listening (container may still be starting)"; ISSUES=$((ISSUES+1))
+    fi
+  done
+
+  # ── 5. Postgres connectivity ────────────────────────────────────────────────
+  echo -e "\n${BOLD}[5/8] PostgreSQL${RESET}"
+  local PG_CONTAINER
+  PG_CONTAINER=$(${DOCKER_SUDO:-} docker compose ps -q postgres 2>/dev/null | head -1 || true)
+  if [ -z "$PG_CONTAINER" ]; then
+    warn "Postgres container not found"; ISSUES=$((ISSUES+1))
+  else
+    # Test local trust-auth socket connection
+    if ${DOCKER_SUDO:-} docker exec "$PG_CONTAINER" \
+        psql -U vpnuser -d vpndb -c "SELECT 1" &>/dev/null 2>&1; then
+      success "Local socket connection OK (trust auth)"
+    else
+      warn "Local socket connection FAILED"; ISSUES=$((ISSUES+1))
+    fi
+
+    # Test that .env password actually authenticates
+    if [ -f "$INSTALL_DIR/.env" ]; then
+      local PG_PASS
+      PG_PASS=$(grep ^POSTGRES_PASSWORD "$INSTALL_DIR/.env" | cut -d'=' -f2-)
+      if ${DOCKER_SUDO:-} docker exec -e PGPASSWORD="$PG_PASS" "$PG_CONTAINER" \
+          psql -U vpnuser -d vpndb -h 127.0.0.1 -c "SELECT 1" &>/dev/null 2>&1; then
+        success ".env POSTGRES_PASSWORD authenticates over TCP"
+      else
+        warn ".env POSTGRES_PASSWORD does NOT match the running DB password"
+        echo -e "  ${YELLOW}Fix:${RESET} docker exec $PG_CONTAINER psql -U vpnuser -d vpndb \\"
+        echo    "       -c \"ALTER USER vpnuser WITH PASSWORD '\$(grep ^POSTGRES_PASSWORD $INSTALL_DIR/.env | cut -d= -f2-)';\""
+        ISSUES=$((ISSUES+1))
+      fi
+    fi
+  fi
+
+  # ── 6. API health ───────────────────────────────────────────────────────────
+  echo -e "\n${BOLD}[6/8] API health endpoint${RESET}"
+  local HTTP_CODE
+  HTTP_CODE=$(curl -o /dev/null -w '%{http_code}' -fsSL --max-time 5 \
+              "http://127.0.0.1:8000/healthz" 2>/dev/null || echo "000")
+  if [ "$HTTP_CODE" = "200" ]; then
+    success "API /healthz → HTTP 200"
+  else
+    warn "API /healthz → HTTP $HTTP_CODE (not reachable yet or unhealthy)"; ISSUES=$((ISSUES+1))
+  fi
+
+  # ── 7. TLS certificate ──────────────────────────────────────────────────────
+  echo -e "\n${BOLD}[7/8] TLS certificate${RESET}"
+  local CERT_FILE="$INSTALL_DIR/nginx/certs/server.crt"
+  if [ -f "$CERT_FILE" ]; then
+    local EXPIRY DAYS_LEFT
+    EXPIRY=$(openssl x509 -enddate -noout -in "$CERT_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+    if [ -n "$EXPIRY" ]; then
+      # Calculate days remaining (POSIX-friendly)
+      local EXP_EPOCH NOW_EPOCH
+      EXP_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY" +%s 2>/dev/null || echo 0)
+      NOW_EPOCH=$(date +%s)
+      DAYS_LEFT=$(( (EXP_EPOCH - NOW_EPOCH) / 86400 ))
+      if [ "$DAYS_LEFT" -gt 30 ]; then
+        success "Certificate expires in ${DAYS_LEFT} days ($EXPIRY)"
+      elif [ "$DAYS_LEFT" -gt 0 ]; then
+        warn "Certificate expires SOON: ${DAYS_LEFT} days ($EXPIRY)"; ISSUES=$((ISSUES+1))
+      else
+        echo -e "${RED}[ERROR]${RESET} Certificate EXPIRED ($EXPIRY)"; ISSUES=$((ISSUES+1))
+      fi
+    else
+      warn "Could not read certificate expiry"
+    fi
+  else
+    warn "Certificate not found at $CERT_FILE"; ISSUES=$((ISSUES+1))
+  fi
+
+  # ── 8. Disk space ───────────────────────────────────────────────────────────
+  echo -e "\n${BOLD}[8/8] Disk space${RESET}"
+  local DISK_USE DISK_AVAIL
+  DISK_USE=$(df -h "$INSTALL_DIR" 2>/dev/null | awk 'NR==2{print $5}' || echo "?")
+  DISK_AVAIL=$(df -h "$INSTALL_DIR" 2>/dev/null | awk 'NR==2{print $4}' || echo "?")
+  info "Volume $(df -h "$INSTALL_DIR" 2>/dev/null | awk 'NR==2{print $1}') — used: $DISK_USE  available: $DISK_AVAIL"
+  # Warn if >90%
+  local DISK_PCT
+  DISK_PCT=$(echo "$DISK_USE" | tr -d '%')
+  if [ -n "$DISK_PCT" ] && [ "$DISK_PCT" -ge 90 ] 2>/dev/null; then
+    warn "Disk usage is critically high ($DISK_USE used)"; ISSUES=$((ISSUES+1))
+  fi
+  # Docker volumes summary
+  local DOCKER_VOL_SIZE
+  DOCKER_VOL_SIZE=$(docker system df 2>/dev/null | awk '/Volumes/{print $3" used, "$4" reclaimable"}' || echo "unknown")
+  info "Docker volumes: $DOCKER_VOL_SIZE"
+
+  # ── Summary ─────────────────────────────────────────────────────────────────
+  echo ""
+  echo -e "${BOLD}────────────────────────────────────────────────────────────${RESET}"
+  if [ "$ISSUES" -eq 0 ]; then
+    echo -e "${BOLD}${GREEN}  Diagnostic passed — no issues found${RESET}"
+  else
+    echo -e "${BOLD}${RED}  Diagnostic found ${ISSUES} issue(s) — review the WARNs/ERRORs above${RESET}"
+  fi
+  echo -e "${BOLD}────────────────────────────────────────────────────────────${RESET}"
+  echo ""
+  info "Dashboard : https://${SERVER_HOST}:${DASHBOARD_PORT}"
+  info "VPN       : ${SERVER_HOST}:${VPN_PORT}"
+  echo ""
 }
 
 # ── Firewall helper ───────────────────────────────────────────────────────────
@@ -708,6 +1010,12 @@ case "${1:-}" in
     status
     exit 0
     ;;
+  --diagnose|-d)
+    banner
+    require_root_or_sudo
+    diagnose
+    exit 0
+    ;;
   --uninstall|-u)
     banner
     require_root_or_sudo
@@ -718,11 +1026,12 @@ case "${1:-}" in
     echo -e "${BOLD}Usage:${RESET}  bash setup.sh [OPTION]"
     echo ""
     echo -e "  ${BOLD}(no args)${RESET}          Fresh install — interactive prompts"
-    echo -e "  ${BOLD}--update,  -U${RESET}      Pull latest code and rebuild changed services"
-    echo -e "  ${BOLD}--rebuild, -r${RESET}      Force full Docker image rebuild (no code pull)"
-    echo -e "  ${BOLD}--status,  -s${RESET}      Show service health and recent logs"
+    echo -e "  ${BOLD}--update,   -U${RESET}     Pull latest code and rebuild changed services"
+    echo -e "  ${BOLD}--rebuild,  -r${RESET}     Force full Docker image rebuild (no code pull)"
+    echo -e "  ${BOLD}--status,   -s${RESET}     Show service health and recent logs"
+    echo -e "  ${BOLD}--diagnose, -d${RESET}     Full system diagnostic (ports, DB, TLS, disk, container logs)"
     echo -e "  ${BOLD}--uninstall,-u${RESET}     Remove all containers, volumes, and files"
-    echo -e "  ${BOLD}--help,    -h${RESET}      Show this help"
+    echo -e "  ${BOLD}--help,     -h${RESET}     Show this help"
     echo ""
     echo -e "${BOLD}Environment variables:${RESET}"
     echo -e "  INSTALL_DIR   Installation path (default: /opt/ocs-vpnstack)"
@@ -733,6 +1042,9 @@ case "${1:-}" in
     echo ""
     echo -e "  # Update an existing install"
     echo -e "  bash /opt/ocs-vpnstack/setup.sh --update"
+    echo ""
+    echo -e "  # Diagnose a broken installation"
+    echo -e "  bash /opt/ocs-vpnstack/setup.sh --diagnose"
     echo ""
     echo -e "  # Custom install directory"
     echo -e "  INSTALL_DIR=/srv/vpn bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)"
@@ -781,3 +1093,4 @@ wait_for_api
 set_admin_password
 open_firewall
 show_summary
+check_docker_health || true

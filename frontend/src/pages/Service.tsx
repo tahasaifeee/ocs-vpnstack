@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Server, FileText, Archive, Radio, Send, Mail,
+  Server, FileText, Archive, Radio, Send, Mail, Wifi,
   CheckCircle2, XCircle, Loader2, RefreshCw, Download, Upload, RotateCcw,
 } from 'lucide-react'
 import { serviceApi } from '../api/client'
 import type {
   BackupInfo, ConfigValidationResult, ServiceStatus,
-  SIEMConfig, SmtpConfig, SyslogConfig,
+  SIEMConfig, SmtpConfig, SyslogConfig, VpnClientSettings,
 } from '../types'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -613,6 +613,67 @@ function SmtpCard() {
   )
 }
 
+// ── VPN Client Settings card ──────────────────────────────────────────────────
+
+function VpnClientCard() {
+  const [form, setForm] = useState<VpnClientSettings>({ server_address: '', client_url: '' })
+  const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const { isLoading, data } = useQuery<VpnClientSettings>({
+    queryKey: ['service-vpn-client'],
+    queryFn: serviceApi.getVpnClient,
+  })
+
+  useEffect(() => { if (data) setForm(data) }, [data])
+
+  const mut = useMutation({
+    mutationFn: () => serviceApi.putVpnClient(form),
+    onSuccess: () => setFeedback({ ok: true, msg: 'Settings saved' }),
+    onError: (e: any) => setFeedback({ ok: false, msg: e?.response?.data?.detail ?? 'Save failed' }),
+  })
+
+  if (isLoading) return <Card title="VPN Client Settings" icon={Wifi}><Loader2 className="animate-spin text-gray-500" size={20} /></Card>
+
+  return (
+    <Card title="VPN Client Settings" icon={Wifi}>
+      <p className="text-sm text-gray-400 mb-4">
+        These values are shown in the post-create credentials panel and included in credential emails.
+      </p>
+      <div className="space-y-4">
+        <Field label="VPN Server Address">
+          <input
+            className={inputCls}
+            value={form.server_address}
+            onChange={(e) => setForm((f) => ({ ...f, server_address: e.target.value }))}
+            placeholder="vpn.example.com"
+          />
+          <p className="text-xs text-gray-600 mt-1">Hostname or IP that users connect to (port 443).</p>
+        </Field>
+        <Field label="VPN Client Download URL">
+          <input
+            className={inputCls}
+            value={form.client_url}
+            onChange={(e) => setForm((f) => ({ ...f, client_url: e.target.value }))}
+            placeholder="https://example.com/downloads/vpn-client.exe"
+          />
+          <p className="text-xs text-gray-600 mt-1">
+            Link to the VPN client installer for your users (Cisco AnyConnect, OpenConnect, etc.)
+          </p>
+        </Field>
+        {feedback && <Feedback ok={feedback.ok} msg={feedback.msg} />}
+        <button
+          onClick={() => { setFeedback(null); mut.mutate() }}
+          disabled={mut.isPending}
+          className={btnPrimary}
+        >
+          {mut.isPending ? <Loader2 size={14} className="inline animate-spin mr-1" /> : null}
+          Save
+        </button>
+      </div>
+    </Card>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Service() {
@@ -629,6 +690,9 @@ export default function Service() {
         <SiemCard />
         <div className="lg:col-span-2">
           <SmtpCard />
+        </div>
+        <div className="lg:col-span-2">
+          <VpnClientCard />
         </div>
       </div>
     </div>

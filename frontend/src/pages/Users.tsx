@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Power, Route, RefreshCw, Search } from 'lucide-react'
-import { usersApi, routesApi, groupsApi } from '../api/client'
-import type { VpnUser, VpnUserWithOtp, Route as VpnRoute, Group } from '../types'
+import { Plus, Trash2, Power, Route, RefreshCw, Search, Copy, Mail, Check, ExternalLink } from 'lucide-react'
+import { usersApi, routesApi, groupsApi, serviceApi } from '../api/client'
+import type { VpnUser, VpnUserWithOtp, Route as VpnRoute, Group, VpnClientSettings } from '../types'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,199 @@ function OtpQrImage({ username }: { username: string }) {
   if (!data) return null
   return (
     <img src={data.qr_data_url} alt="OTP QR Code" className="w-48 h-48 mx-auto rounded bg-white p-1" />
+  )
+}
+
+// ── Post-create credentials panel ─────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Copy"
+      className="ml-2 text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
+    >
+      {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
+    </button>
+  )
+}
+
+function CredentialsRow({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
+  const [shown, setShown] = useState(false)
+  const display = secret && !shown ? '••••••••' : value
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
+      <span className="text-xs text-gray-500 w-28 flex-shrink-0">{label}</span>
+      <div className="flex items-center gap-1 min-w-0 flex-1">
+        {secret ? (
+          <button
+            className="font-mono text-sm text-gray-200 truncate hover:text-white transition-colors text-left"
+            onClick={() => setShown((s) => !s)}
+            title={shown ? 'Hide' : 'Click to reveal'}
+          >
+            {display}
+          </button>
+        ) : (
+          <span className="font-mono text-sm text-gray-200 truncate">{value}</span>
+        )}
+        <CopyButton text={value} />
+      </div>
+    </div>
+  )
+}
+
+function CredentialsPanel({
+  created,
+  password,
+  onClose,
+}: {
+  created: VpnUserWithOtp
+  password: string
+  onClose: () => void
+}) {
+  const { data: vpnClient } = useQuery<VpnClientSettings>({
+    queryKey: ['service-vpn-client'],
+    queryFn: serviceApi.getVpnClient,
+  })
+
+  const serverHost = vpnClient?.server_address || window.location.hostname
+  const clientUrl  = vpnClient?.client_url || ''
+
+  const [emailTo, setEmailTo] = useState(created.email ?? '')
+  const [emailResult, setEmailResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const sendMut = useMutation({
+    mutationFn: () =>
+      usersApi.sendCredentials(created.username, {
+        to_email: emailTo,
+        password,
+        server_host: serverHost,
+        client_url: clientUrl,
+      }),
+    onSuccess: () => setEmailResult({ ok: true, msg: `Credentials sent to ${emailTo}` }),
+    onError: (e: any) =>
+      setEmailResult({ ok: false, msg: e?.response?.data?.detail ?? 'Failed to send email' }),
+  })
+
+  const copyAll = () => {
+    const lines = [
+      `Server:   ${serverHost}`,
+      `Protocol: 443/TCP (AnyConnect / OpenConnect)`,
+      `Username: ${created.username}`,
+      `Password: ${password}`,
+      ...(clientUrl ? [`Download: ${clientUrl}`] : []),
+    ]
+    navigator.clipboard.writeText(lines.join('\n'))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 w-full max-w-md my-auto">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-full bg-green-900/60 flex items-center justify-center">
+            <Check size={18} className="text-green-400" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold">User created</h3>
+            <p className="text-xs text-gray-500">{created.username}</p>
+          </div>
+        </div>
+
+        {/* Connection details */}
+        <div className="bg-gray-800/60 rounded-xl px-4 py-1 mb-4">
+          <CredentialsRow label="Server" value={serverHost} />
+          <CredentialsRow label="Protocol" value="443/TCP · AnyConnect" />
+          <CredentialsRow label="Username" value={created.username} />
+          <CredentialsRow label="Password" value={password} secret />
+          {clientUrl && (
+            <div className="flex items-center justify-between py-2">
+              <span className="text-xs text-gray-500 w-28 flex-shrink-0">VPN Client</span>
+              <a
+                href={clientUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors truncate"
+              >
+                Download <ExternalLink size={11} />
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Copy all button */}
+        <button
+          onClick={copyAll}
+          className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-lg mb-4 transition-colors"
+        >
+          <Copy size={14} /> Copy all details
+        </button>
+
+        {/* OTP QR */}
+        {created.otp_enabled && (
+          <div className="bg-gray-800/60 rounded-xl p-4 mb-4">
+            <p className="text-sm font-medium mb-3 text-center">Scan with authenticator app</p>
+            <OtpQrImage username={created.username} />
+            {created.otp_secret && (
+              <details className="mt-3">
+                <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-300 text-center">
+                  Show secret key
+                </summary>
+                <div className="mt-2 flex items-center justify-center gap-2">
+                  <code className="text-xs font-mono text-gray-300 bg-gray-900 px-3 py-1.5 rounded break-all">
+                    {created.otp_secret}
+                  </code>
+                  <CopyButton text={created.otp_secret} />
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Email section */}
+        <div className="space-y-2 mb-5">
+          <p className="text-xs text-gray-500">Send credentials by email:</p>
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              placeholder="recipient@example.com"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={() => { setEmailResult(null); sendMut.mutate() }}
+              disabled={sendMut.isPending || !emailTo}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+            >
+              {sendMut.isPending
+                ? <RefreshCw size={13} className="animate-spin" />
+                : <Mail size={13} />}
+              Send
+            </button>
+          </div>
+          {emailResult && (
+            <p className={`text-xs ${emailResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+              {emailResult.ok ? '✓' : '✗'} {emailResult.msg}
+            </p>
+          )}
+        </div>
+
+        <button
+          onClick={onClose}
+          className="w-full bg-gray-800 hover:bg-gray-700 rounded-lg py-2 text-sm font-medium transition-colors"
+        >
+          Done
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -110,23 +303,7 @@ function UserModal({
   }
 
   if (created) {
-    return (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-        <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 w-full max-w-sm">
-          <h3 className="text-lg font-semibold mb-4 text-green-400">User created!</h3>
-          {created.otp_uri && (
-            <div className="mb-4">
-              <p className="text-sm text-gray-300 mb-2">Scan this QR with your authenticator app:</p>
-              <OtpQrImage username={created.username} />
-              <p className="text-xs text-gray-500 mt-2 break-all text-center">{created.otp_secret}</p>
-            </div>
-          )}
-          <button onClick={onClose} className="w-full bg-blue-600 hover:bg-blue-700 rounded-lg py-2 text-sm font-medium">
-            Done
-          </button>
-        </div>
-      </div>
-    )
+    return <CredentialsPanel created={created} password={form.password} onClose={onClose} />
   }
 
   return (

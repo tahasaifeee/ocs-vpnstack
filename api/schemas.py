@@ -306,3 +306,15 @@ class SmtpConfig(BaseModel):
     from_name: str = "VPN Dashboard"
     use_tls: bool = True      # STARTTLS on port 587
     use_ssl: bool = False     # Implicit SSL on port 465
+
+
+class VpnClientSettings(BaseModel):
+    server_address: str = ""   # hostname/IP users connect to (e.g. vpn.example.com)
+    client_url: str = ""       # download URL for the VPN client app
+
+
+class SendCredentialsRequest(BaseModel):
+    to_email: str
+    password: str              # plaintext password to include in the email
+    server_host: str = ""
+    client_url: str = ""

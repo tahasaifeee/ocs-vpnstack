@@ -187,3 +187,8 @@ export interface SmtpConfig {
   use_tls: boolean
   use_ssl: boolean
 }
+
+export interface VpnClientSettings {
+  server_address: string
+  client_url: string
+}

@@ -18,16 +18,55 @@ The script will:
 - Write the `.env` file with auto-generated secrets
 - Build and start all services
 - Open firewall ports via ufw / firewalld automatically
+- Save your port/host config to `.setup-state` for future updates
 
 > **Custom install directory**
 > ```bash
 > INSTALL_DIR=/home/myuser/vpn bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)
 > ```
 
-> **Uninstall** (removes all containers, volumes, and files)
-> ```bash
-> bash /opt/ocs-vpnstack/setup.sh --uninstall
-> ```
+---
+
+## Updating
+
+When this repo receives new code changes, apply them to your running stack with a single command:
+
+```bash
+bash /opt/ocs-vpnstack/setup.sh --update
+```
+
+The update command will:
+1. Fetch the latest commits and **show you a changelog** before doing anything
+2. Ask for confirmation
+3. Detect **which services changed** (`api`, `frontend`, `ocserv`) and rebuild only those
+4. Perform a **rolling restart** — restarts one service at a time so your VPN stays up during frontend/API updates
+5. Re-apply your saved port configuration automatically (no re-prompting)
+6. Run a health check and show a status summary
+
+**Other management commands:**
+
+```bash
+# Check service health + recent logs
+bash /opt/ocs-vpnstack/setup.sh --status
+
+# Force a full image rebuild without pulling new code
+bash /opt/ocs-vpnstack/setup.sh --rebuild
+
+# Remove everything (containers, volumes, files)
+bash /opt/ocs-vpnstack/setup.sh --uninstall
+```
+
+Full help:
+
+```bash
+bash /opt/ocs-vpnstack/setup.sh --help
+```
+
+> **How updates preserve your config**
+> On first install, `setup.sh` saves your port numbers, server host, and TLS type to
+> `/opt/ocs-vpnstack/.setup-state`. On `--update` this file is read back so your
+> customised ports are re-applied to the fresh `docker-compose.yml` automatically.
+> Your `.env` (passwords, secret key) is backed up before every update.
 
 ---
 

@@ -21,17 +21,13 @@ RUN chmod +x /etc/ocserv/connect.sh /etc/ocserv/disconnect.sh
 # Generate self-signed cert if none provided
 RUN if [ ! -f /etc/ocserv/server.crt ]; then \
     certtool --generate-privkey --outfile /etc/ocserv/server.key && \
+    printf 'cn = "VPN Server"\norganization = "VPN"\nserial = 1\nexpiration_days = 3650\nsigning_key\ntls_www_server\n' \
+        > /tmp/cert.cfg && \
     certtool --generate-self-signed \
         --load-privkey /etc/ocserv/server.key \
         --outfile /etc/ocserv/server.crt \
-        --template /dev/stdin <<EOF
-cn = "VPN Server"
-organization = "VPN"
-serial = 1
-expiration_days = 3650
-signing_key
-tls_www_server
-EOF
+        --template /tmp/cert.cfg && \
+    rm -f /tmp/cert.cfg; \
     fi
 
 EXPOSE 443/tcp 443/udp

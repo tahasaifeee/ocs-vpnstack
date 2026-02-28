@@ -744,6 +744,28 @@ esac
 # ── Main flow ─────────────────────────────────────────────────────────────────
 banner
 require_root_or_sudo
+
+# Guard: detect an existing installation and refuse a destructive re-run.
+# Running the plain install flow a second time would overwrite .env with a
+# freshly generated POSTGRES_PASSWORD while the postgres volume still holds the
+# old password, permanently breaking the API connection.
+if [ -f "$STATE_FILE" ] || [ -f "$INSTALL_DIR/.env" ]; then
+  echo ""
+  echo -e "${BOLD}${YELLOW}⚠  Existing installation detected at $INSTALL_DIR${RESET}"
+  echo ""
+  echo -e "  Running a fresh install would overwrite ${BOLD}.env${RESET} with new random"
+  echo -e "  credentials while the postgres data volume keeps the old ones,"
+  echo -e "  permanently breaking the database connection."
+  echo ""
+  echo -e "  ${BOLD}Use one of these instead:${RESET}"
+  echo -e "  $INSTALL_DIR/setup.sh ${CYAN}--update${RESET}     # pull latest code & rebuild"
+  echo -e "  $INSTALL_DIR/setup.sh ${CYAN}--rebuild${RESET}    # force full image rebuild"
+  echo -e "  $INSTALL_DIR/setup.sh ${CYAN}--status${RESET}     # check service health"
+  echo -e "  $INSTALL_DIR/setup.sh ${CYAN}--uninstall${RESET}  # remove everything, then reinstall"
+  echo ""
+  exit 1
+fi
+
 detect_os
 install_basics
 install_docker

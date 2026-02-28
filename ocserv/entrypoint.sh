@@ -4,6 +4,13 @@ set -e
 # Preserve ocserv.conf if it already exists (may contain dashboard-managed settings).
 # Scripts are always refreshed from the image so hook changes propagate on restart.
 [ -f /etc/ocserv/ocserv.conf ] || cp /opt/ocserv-defaults/ocserv.conf /etc/ocserv/ocserv.conf
+
+# Migration: ensure server-cert/server-key lines exist (absent in configs written
+# before this was added — old named volume from a prior install).
+if ! grep -q '^server-cert' /etc/ocserv/ocserv.conf; then
+    printf '\n# TLS certificates (auto-added by entrypoint migration)\nserver-cert = /etc/ocserv/server.crt\nserver-key  = /etc/ocserv/server.key\n' \
+        >> /etc/ocserv/ocserv.conf
+fi
 cp /opt/ocserv-defaults/connect.sh   /etc/ocserv/connect.sh
 cp /opt/ocserv-defaults/disconnect.sh /etc/ocserv/disconnect.sh
 chmod +x /etc/ocserv/connect.sh /etc/ocserv/disconnect.sh

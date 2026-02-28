@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Power, Route, RefreshCw, Search, Copy, Mail, Check, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, Power, Route, RefreshCw, Search, Copy, Mail, Check, ExternalLink, Info, Eye, EyeOff, KeyRound, X } from 'lucide-react'
 import { usersApi, routesApi, groupsApi, serviceApi } from '../api/client'
 import type { VpnUser, VpnUserWithOtp, Route as VpnRoute, Group, VpnClientSettings } from '../types'
 
@@ -220,6 +220,190 @@ function CredentialsPanel({
           className="w-full bg-gray-800 hover:bg-gray-700 rounded-lg py-2 text-sm font-medium transition-colors"
         >
           Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── User info / credentials modal ─────────────────────────────────────────────
+
+function UserInfoModal({ user, onClose }: { user: VpnUser; onClose: () => void }) {
+  const { data: vpnClient } = useQuery<VpnClientSettings>({
+    queryKey: ['service-vpn-client'],
+    queryFn: serviceApi.getVpnClient,
+  })
+
+  const serverHost = vpnClient?.server_address || window.location.hostname
+  const clientUrl  = vpnClient?.client_url || ''
+
+  const qc = useQueryClient()
+  const [newPassword, setNewPassword] = useState('')
+  const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
+  const [pwShown, setPwShown] = useState(false)
+
+  const setPwMut = useMutation({
+    mutationFn: () => usersApi.update(user.username, { password: newPassword }),
+    onSuccess: () => {
+      setRevealedPassword(newPassword)
+      setNewPassword('')
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+
+  const [emailTo, setEmailTo] = useState(user.email ?? '')
+  const [emailResult, setEmailResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const sendMut = useMutation({
+    mutationFn: () =>
+      usersApi.sendCredentials(user.username, {
+        to_email: emailTo,
+        password: revealedPassword ?? '',
+        server_host: serverHost,
+        client_url: clientUrl,
+      }),
+    onSuccess: () => setEmailResult({ ok: true, msg: `Credentials sent to ${emailTo}` }),
+    onError: (e: any) =>
+      setEmailResult({ ok: false, msg: e?.response?.data?.detail ?? 'Failed to send email' }),
+  })
+
+  const copyAll = () => {
+    const lines = [
+      `Server:   ${serverHost}`,
+      `Protocol: 443/TCP (AnyConnect / OpenConnect)`,
+      `Username: ${user.username}`,
+      ...(revealedPassword ? [`Password: ${revealedPassword}`] : []),
+      ...(clientUrl ? [`Download: ${clientUrl}`] : []),
+    ]
+    navigator.clipboard.writeText(lines.join('\n'))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 w-full max-w-md my-auto">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-blue-900/60 flex items-center justify-center">
+              <Info size={18} className="text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold">{user.username}</h3>
+              {user.email && <p className="text-xs text-gray-500">{user.email}</p>}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Connection details */}
+        <div className="bg-gray-800/60 rounded-xl px-4 py-1 mb-4">
+          <CredentialsRow label="Server" value={serverHost} />
+          <CredentialsRow label="Protocol" value="443/TCP · AnyConnect" />
+          <CredentialsRow label="Username" value={user.username} />
+          {revealedPassword && <CredentialsRow label="Password" value={revealedPassword} secret />}
+          {clientUrl && (
+            <div className="flex items-center justify-between py-2">
+              <span className="text-xs text-gray-500 w-28 flex-shrink-0">VPN Client</span>
+              <a
+                href={clientUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors truncate"
+              >
+                Download <ExternalLink size={11} />
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Copy all */}
+        <button
+          onClick={copyAll}
+          className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-lg mb-4 transition-colors"
+        >
+          <Copy size={14} /> Copy all details
+        </button>
+
+        {/* OTP QR */}
+        {user.otp_enabled && (
+          <div className="bg-gray-800/60 rounded-xl p-4 mb-4">
+            <p className="text-sm font-medium mb-3 text-center">2FA QR Code</p>
+            <OtpQrImage username={user.username} />
+          </div>
+        )}
+
+        {/* Set / reveal password */}
+        <div className="bg-gray-800/60 rounded-xl p-4 mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <KeyRound size={14} className="text-yellow-400" />
+            <p className="text-xs font-medium text-gray-300">Set a new password to share</p>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type={pwShown ? 'text' : 'password'}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="New password (min 6 chars)"
+              className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={() => setPwShown((s) => !s)}
+              className="p-2 text-gray-500 hover:text-gray-300 transition-colors"
+              title={pwShown ? 'Hide' : 'Show'}
+            >
+              {pwShown ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+            <button
+              onClick={() => setPwMut.mutate()}
+              disabled={setPwMut.isPending || newPassword.length < 6}
+              className="bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+            >
+              {setPwMut.isPending ? '…' : 'Set'}
+            </button>
+          </div>
+          {setPwMut.isSuccess && revealedPassword && (
+            <p className="text-xs text-green-400 mt-2">✓ Password updated — shown above</p>
+          )}
+        </div>
+
+        {/* Email */}
+        <div className="space-y-2 mb-5">
+          <p className="text-xs text-gray-500">Send credentials by email:</p>
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              placeholder="recipient@example.com"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={() => { setEmailResult(null); sendMut.mutate() }}
+              disabled={sendMut.isPending || !emailTo || !revealedPassword}
+              title={!revealedPassword ? 'Set a password first' : undefined}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+            >
+              {sendMut.isPending ? <RefreshCw size={13} className="animate-spin" /> : <Mail size={13} />}
+              Send
+            </button>
+          </div>
+          {!revealedPassword && (
+            <p className="text-xs text-gray-600">Set a password above before sending credentials.</p>
+          )}
+          {emailResult && (
+            <p className={`text-xs ${emailResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+              {emailResult.ok ? '✓' : '✗'} {emailResult.msg}
+            </p>
+          )}
+        </div>
+
+        <button
+          onClick={onClose}
+          className="w-full bg-gray-800 hover:bg-gray-700 rounded-lg py-2 text-sm font-medium transition-colors"
+        >
+          Close
         </button>
       </div>
     </div>
@@ -518,6 +702,7 @@ export default function Users() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editUser, setEditUser] = useState<VpnUser | null>(null)
   const [routeUser, setRouteUser] = useState<string | null>(null)
+  const [infoUser, setInfoUser] = useState<VpnUser | null>(null)
 
   const { data: users = [], isLoading } = useQuery<VpnUser[]>({
     queryKey: ['users'],
@@ -619,6 +804,13 @@ export default function Users() {
                         <Route size={14} />
                       </button>
                       <button
+                        title="View details"
+                        onClick={() => setInfoUser(u)}
+                        className="p-1.5 rounded-md text-blue-400 hover:bg-blue-900/30 transition-colors"
+                      >
+                        <Info size={14} />
+                      </button>
+                      <button
                         title="Edit"
                         onClick={() => setEditUser(u)}
                         className="p-1.5 rounded-md text-gray-400 hover:bg-gray-800 transition-colors"
@@ -644,6 +836,7 @@ export default function Users() {
       {createOpen && <UserModal onClose={() => setCreateOpen(false)} />}
       {editUser && <UserModal user={editUser} onClose={() => setEditUser(null)} />}
       {routeUser && <RoutesModal username={routeUser} onClose={() => setRouteUser(null)} />}
+      {infoUser && <UserInfoModal user={infoUser} onClose={() => setInfoUser(null)} />}
     </div>
   )
 }

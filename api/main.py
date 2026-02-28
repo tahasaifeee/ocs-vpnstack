@@ -30,6 +30,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)"
         ))
+        # VPN-user OTP columns (added after initial schema)
+        await conn.execute(text(
+            "ALTER TABLE vpn_users ADD COLUMN IF NOT EXISTS otp_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE vpn_users ADD COLUMN IF NOT EXISTS otp_secret VARCHAR(64)"
+        ))
 
     # Seed default admin if none exists
     async with AsyncSessionLocal() as db:

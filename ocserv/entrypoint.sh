@@ -1,9 +1,9 @@
 #!/bin/sh
 set -e
 
-# Always apply the config/scripts baked into the image, preserving data files
-# (certs, ocpasswd, users.oath) that live in the mounted volume.
-cp /opt/ocserv-defaults/ocserv.conf  /etc/ocserv/ocserv.conf
+# Preserve ocserv.conf if it already exists (may contain dashboard-managed settings).
+# Scripts are always refreshed from the image so hook changes propagate on restart.
+[ -f /etc/ocserv/ocserv.conf ] || cp /opt/ocserv-defaults/ocserv.conf /etc/ocserv/ocserv.conf
 cp /opt/ocserv-defaults/connect.sh   /etc/ocserv/connect.sh
 cp /opt/ocserv-defaults/disconnect.sh /etc/ocserv/disconnect.sh
 chmod +x /etc/ocserv/connect.sh /etc/ocserv/disconnect.sh

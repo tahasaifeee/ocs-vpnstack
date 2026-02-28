@@ -3,6 +3,11 @@ import { WifiOff, RefreshCw } from 'lucide-react'
 import { sessionsApi, usersApi } from '../api/client'
 import type { ActiveSession } from '../types'
 
+function countryFlag(code?: string | null) {
+  if (!code || code.length !== 2) return ''
+  return String.fromCodePoint(...code.toUpperCase().split('').map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
+}
+
 function formatBytes(b: number) {
   if (b < 1024) return `${b} B`
   if (b < 1024 ** 2) return `${(b / 1024).toFixed(1)} KB`
@@ -51,6 +56,7 @@ export default function Sessions() {
               <tr className="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
                 <th className="text-left px-4 py-3">User</th>
                 <th className="text-left px-4 py-3">Public IP</th>
+                <th className="text-left px-4 py-3">Location</th>
                 <th className="text-left px-4 py-3">VPN IP</th>
                 <th className="text-left px-4 py-3">Device</th>
                 <th className="text-left px-4 py-3">Connected</th>
@@ -63,6 +69,13 @@ export default function Sessions() {
                 <tr key={i} className="hover:bg-gray-800/50 transition-colors">
                   <td className="px-4 py-3 font-medium text-green-400">{s.username}</td>
                   <td className="px-4 py-3 text-gray-300 font-mono text-xs">{s.ip_real}</td>
+                  <td className="px-4 py-3 text-gray-400 text-xs">
+                    {s.geo_country ? (
+                      <span title={[s.geo_city, s.geo_country].filter(Boolean).join(', ')}>
+                        {countryFlag(s.geo_country_code)} {s.geo_city || s.geo_country}
+                      </span>
+                    ) : <span className="text-gray-600">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-gray-300 font-mono text-xs">{s.ip_local}</td>
                   <td className="px-4 py-3 text-gray-400 text-xs">{s.device}</td>
                   <td className="px-4 py-3 text-gray-400 text-xs">{s.connected_since}</td>

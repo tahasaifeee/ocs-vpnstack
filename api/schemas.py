@@ -18,7 +18,6 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 class AdminUpdateRequest(BaseModel):
-    """Used by PATCH /auth/me to change the dashboard admin's own credentials."""
     current_password: str
     new_password: str | None = Field(None, min_length=8)
     new_username: str | None = Field(None, min_length=1, max_length=64)
@@ -35,6 +34,39 @@ class TotpDisableRequest(BaseModel):
     password: str
 
 
+# ── Groups ────────────────────────────────────────────────────────────────────
+
+class GroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9._\-]+$")
+    description: str | None = None
+    max_sessions: int | None = Field(None, ge=1)
+    quota_bytes: int | None = None
+    dns_servers: str | None = None
+    split_tunnel: bool = False
+    session_timeout: int | None = Field(None, ge=60)
+
+class GroupUpdate(BaseModel):
+    description: str | None = None
+    max_sessions: int | None = Field(None, ge=1)
+    quota_bytes: int | None = None
+    dns_servers: str | None = None
+    split_tunnel: bool | None = None
+    session_timeout: int | None = Field(None, ge=60)
+
+class GroupOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    max_sessions: int | None
+    quota_bytes: int | None
+    dns_servers: str | None
+    split_tunnel: bool
+    session_timeout: int | None
+    user_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
 # ── VPN Users ─────────────────────────────────────────────────────────────────
 
 class VpnUserCreate(BaseModel):
@@ -44,6 +76,10 @@ class VpnUserCreate(BaseModel):
     otp_enabled: bool = False
     quota_bytes: int | None = None
     notes: str | None = None
+    group_id: int | None = None
+    static_ip: str | None = Field(None, pattern=r"^\d{1,3}(\.\d{1,3}){3}$")
+    max_sessions: int | None = Field(None, ge=1)
+    dns_servers: str | None = None
 
 class VpnUserUpdate(BaseModel):
     password: str | None = None
@@ -52,6 +88,10 @@ class VpnUserUpdate(BaseModel):
     otp_enabled: bool | None = None
     quota_bytes: int | None = None
     notes: str | None = None
+    group_id: int | None = None
+    static_ip: str | None = Field(None, pattern=r"^\d{1,3}(\.\d{1,3}){3}$")
+    max_sessions: int | None = None
+    dns_servers: str | None = None
 
 class VpnUserOut(BaseModel):
     id: int
@@ -62,6 +102,10 @@ class VpnUserOut(BaseModel):
     quota_bytes: int | None
     notes: str | None
     created_at: datetime
+    group_id: int | None = None
+    static_ip: str | None = None
+    max_sessions: int | None = None
+    dns_servers: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -97,6 +141,9 @@ class ActiveSession(BaseModel):
     connected_since: str
     rx_bytes: int
     tx_bytes: int
+    geo_country: str | None = None
+    geo_country_code: str | None = None
+    geo_city: str | None = None
 
 class SessionLogOut(BaseModel):
     id: int
@@ -121,6 +168,18 @@ class UserStatsOut(BaseModel):
     total_bytes_out: int
     total_sessions: int
     last_seen: datetime | None
+
+
+# ── Network config ────────────────────────────────────────────────────────────
+
+class NetworkConfig(BaseModel):
+    ipv4_network: str = "172.16.0.0/16"
+    ipv4_netmask: str = "255.255.0.0"
+    dns_servers: list[str] = ["8.8.8.8", "1.1.1.1"]
+    max_clients: int = 128
+    max_same_clients: int = 2
+    ipv6_network: str | None = None
+    tunnel_all_dns: bool = True
 
 
 # ── Internal events ───────────────────────────────────────────────────────────

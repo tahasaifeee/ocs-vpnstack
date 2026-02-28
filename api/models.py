@@ -1,8 +1,24 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, BigInteger, Text, ForeignKey, func
+from sqlalchemy import String, Boolean, DateTime, BigInteger, Integer, Text, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+
+
+class Group(Base):
+    """VPN user group with shared policy settings."""
+    __tablename__ = "groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    max_sessions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    dns_servers: Mapped[str | None] = mapped_column(String(256), nullable=True)  # comma-separated
+    split_tunnel: Mapped[bool] = mapped_column(Boolean, default=False)
+    session_timeout: Mapped[int | None] = mapped_column(Integer, nullable=True)  # seconds
+
+    users: Mapped[list["VpnUser"]] = relationship("VpnUser", back_populates="group")
 
 
 class AdminUser(Base):
@@ -28,13 +44,20 @@ class VpnUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     otp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     otp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # None = unlimited
+    quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("groups.id", ondelete="SET NULL"), nullable=True
+    )
+    static_ip: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    max_sessions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dns_servers: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    group: Mapped["Group | None"] = relationship("Group", back_populates="users")
     sessions: Mapped[list["SessionLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     routes: Mapped[list["UserRoute"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -64,8 +87,8 @@ class UserRoute(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("vpn_users.id", ondelete="CASCADE"), index=True)
-    cidr: Mapped[str] = mapped_column(String(43))  # e.g. "10.10.0.0/24"
-    is_excluded: Mapped[bool] = mapped_column(Boolean, default=False)  # True = no-route
+    cidr: Mapped[str] = mapped_column(String(43))
+    is_excluded: Mapped[bool] = mapped_column(Boolean, default=False)
 
     user: Mapped["VpnUser"] = relationship(back_populates="routes")
 

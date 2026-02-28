@@ -10,26 +10,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /etc/ocserv/conf.d /etc/ocserv/user-routes /var/log/ocserv /run/ocserv
+RUN mkdir -p /etc/ocserv/conf.d /etc/ocserv/user-routes /var/log/ocserv /run/ocserv \
+             /opt/ocserv-defaults
 
-COPY ocserv.conf /etc/ocserv/ocserv.conf
-COPY connect.sh /etc/ocserv/connect.sh
-COPY disconnect.sh /etc/ocserv/disconnect.sh
+# Store config/scripts in an image-only path so the entrypoint can always
+# stamp them into the volume-mounted /etc/ocserv on container start.
+COPY ocserv.conf   /opt/ocserv-defaults/ocserv.conf
+COPY connect.sh    /opt/ocserv-defaults/connect.sh
+COPY disconnect.sh /opt/ocserv-defaults/disconnect.sh
+COPY entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /etc/ocserv/connect.sh /etc/ocserv/disconnect.sh
-
-# Generate self-signed cert if none provided
-RUN if [ ! -f /etc/ocserv/server.crt ]; then \
-    certtool --generate-privkey --outfile /etc/ocserv/server.key && \
-    printf 'cn = "VPN Server"\norganization = "VPN"\nserial = 1\nexpiration_days = 3650\nsigning_key\ntls_www_server\n' \
-        > /tmp/cert.cfg && \
-    certtool --generate-self-signed \
-        --load-privkey /etc/ocserv/server.key \
-        --outfile /etc/ocserv/server.crt \
-        --template /tmp/cert.cfg && \
-    rm -f /tmp/cert.cfg; \
-    fi
+RUN chmod +x /opt/ocserv-defaults/connect.sh \
+             /opt/ocserv-defaults/disconnect.sh \
+             /entrypoint.sh
 
 EXPOSE 443/tcp 443/udp
 
-CMD ["ocserv", "--foreground", "--config", "/etc/ocserv/ocserv.conf"]
+ENTRYPOINT ["/entrypoint.sh"]

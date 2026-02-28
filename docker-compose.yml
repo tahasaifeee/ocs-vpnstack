@@ -20,15 +20,14 @@ services:
       - vpn-net
     restart: unless-stopped
     healthcheck:
-      # ocserv creates the socket only once it is fully initialised and ready
-      # to accept connections.  Querying `occtl show status` is unreliable at
-      # startup (the main worker may not be ready yet); testing the socket
-      # file is simpler, faster, and equally authoritative.
-      test: ["CMD-SHELL", "test -S /run/ocserv/ocserv.sock"]
+      # Check that ocserv is listening on TCP 443. The admin socket
+      # (/run/ocserv/ocserv.sock) is created later and is unreliable as a
+      # readiness probe; ss is available via the iproute2 package.
+      test: ["CMD-SHELL", "ss -tlnp | grep -q ':443'"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   # ── FastAPI backend ──────────────────────────────────────────────────────────
   api:

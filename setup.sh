@@ -911,7 +911,8 @@ diagnose() {
 
   # ── 4. Port availability ────────────────────────────────────────────────────
   echo -e "\n${BOLD}[4/8] Port listeners${RESET}"
-  local CHECK_PORTS=("${VPN_PORT}:VPN(tcp)" "${VPN_PORT}:VPN(udp)" "${DASHBOARD_PORT}:Dashboard" "8000:API-internal")
+  # Port 8000 is internal-only (not exposed to host); API is checked via nginx below.
+  local CHECK_PORTS=("${VPN_PORT}:VPN(tcp)" "${VPN_PORT}:VPN(udp)" "${DASHBOARD_PORT}:Dashboard")
   for ENTRY in "${CHECK_PORTS[@]}"; do
     local PORT LABEL
     PORT="${ENTRY%%:*}"; LABEL="${ENTRY#*:}"
@@ -955,14 +956,15 @@ diagnose() {
   fi
 
   # ── 6. API health ───────────────────────────────────────────────────────────
+  # Port 8000 is not exposed to the host — reach the API through the nginx proxy.
   echo -e "\n${BOLD}[6/8] API health endpoint${RESET}"
   local HTTP_CODE
-  HTTP_CODE=$(curl -o /dev/null -w '%{http_code}' -fsSL --max-time 5 \
-              "http://127.0.0.1:8000/healthz" 2>/dev/null || echo "000")
+  HTTP_CODE=$(curl -o /dev/null -w '%{http_code}' -fsSLk --max-time 5 \
+              "https://127.0.0.1:${DASHBOARD_PORT:-8443}/api/healthz" 2>/dev/null || echo "000")
   if [ "$HTTP_CODE" = "200" ]; then
-    success "API /healthz → HTTP 200"
+    success "API /healthz → HTTP 200 (via nginx proxy)"
   else
-    warn "API /healthz → HTTP $HTTP_CODE (not reachable yet or unhealthy)"; ISSUES=$((ISSUES+1))
+    warn "API /healthz → HTTP $HTTP_CODE (not reachable via nginx proxy)"; ISSUES=$((ISSUES+1))
   fi
 
   # ── 7. TLS certificate ──────────────────────────────────────────────────────

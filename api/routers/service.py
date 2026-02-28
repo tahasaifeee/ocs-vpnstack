@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import occtl
 import siem as siem_module
+import mailer
 from auth import get_current_admin
 from database import get_db
 from models import AdminUser, SystemSetting
@@ -26,6 +27,7 @@ from schemas import (
     ConfigValidationResult,
     ServiceStatusOut,
     SIEMConfig,
+    SmtpConfig,
     SyslogConfig,
 )
 
@@ -329,3 +331,72 @@ def _validate_conf_text(text: str) -> ConfigValidationResult:
             errors.append(f"Required directive missing: {req}")
 
     return ConfigValidationResult(valid=not errors, errors=errors, warnings=warnings)
+
+
+# ── SMTP settings ─────────────────────────────────────────────────────────────
+
+_SMTP_KEYS = [
+    "smtp_enabled", "smtp_host", "smtp_port", "smtp_username", "smtp_password",
+    "smtp_from_email", "smtp_from_name", "smtp_use_tls", "smtp_use_ssl",
+]
+
+
+async def _load_smtp(db: AsyncSession) -> SmtpConfig:
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(_SMTP_KEYS)))
+    s = {r.key: r.value for r in result.scalars().all()}
+    return SmtpConfig(
+        enabled=s.get("smtp_enabled", "false").lower() == "true",
+        host=s.get("smtp_host", ""),
+        port=int(s.get("smtp_port") or 587),
+        username=s.get("smtp_username", ""),
+        password=s.get("smtp_password", ""),
+        from_email=s.get("smtp_from_email", ""),
+        from_name=s.get("smtp_from_name", "VPN Dashboard"),
+        use_tls=s.get("smtp_use_tls", "true").lower() == "true",
+        use_ssl=s.get("smtp_use_ssl", "false").lower() == "true",
+    )
+
+
+@router.get("/smtp", response_model=SmtpConfig)
+async def get_smtp(
+    db: AsyncSession = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    return await _load_smtp(db)
+
+
+@router.put("/smtp", response_model=SmtpConfig)
+async def put_smtp(
+    body: SmtpConfig,
+    db: AsyncSession = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    await _upsert(db, "smtp_enabled",    str(body.enabled).lower())
+    await _upsert(db, "smtp_host",       body.host)
+    await _upsert(db, "smtp_port",       str(body.port))
+    await _upsert(db, "smtp_username",   body.username)
+    await _upsert(db, "smtp_password",   body.password)
+    await _upsert(db, "smtp_from_email", body.from_email)
+    await _upsert(db, "smtp_from_name",  body.from_name)
+    await _upsert(db, "smtp_use_tls",    str(body.use_tls).lower())
+    await _upsert(db, "smtp_use_ssl",    str(body.use_ssl).lower())
+    await db.commit()
+    mailer.cache_smtp_config(body.model_dump())
+    return body
+
+
+@router.post("/smtp/test")
+async def test_smtp(
+    to: str,
+    db: AsyncSession = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    """Send a test email to the given address using the saved SMTP config."""
+    cfg = await _load_smtp(db)
+    if not cfg.enabled or not cfg.host or not cfg.from_email:
+        raise HTTPException(status_code=400, detail="SMTP not enabled or incomplete")
+    try:
+        await mailer.send_test_email(to_email=to, cfg=cfg.model_dump())
+        return {"sent": True, "to": to}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))

@@ -175,3 +175,15 @@ export interface SIEMConfig {
   token: string
   verify_ssl: boolean
 }
+
+export interface SmtpConfig {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  password: string
+  from_email: string
+  from_name: string
+  use_tls: boolean
+  use_ssl: boolean
+}

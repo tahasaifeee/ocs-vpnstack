@@ -164,4 +164,7 @@ export const serviceApi = {
   getSiem: () => api.get('/service/siem').then((r) => r.data),
   putSiem: (data: unknown) => api.put('/service/siem', data).then((r) => r.data),
   testSiem: () => api.post('/service/siem/test').then((r) => r.data),
+  getSmtp: () => api.get('/service/smtp').then((r) => r.data),
+  putSmtp: (data: unknown) => api.put('/service/smtp', data).then((r) => r.data),
+  testSmtp: (to: string) => api.post('/service/smtp/test', null, { params: { to } }).then((r) => r.data),
 }

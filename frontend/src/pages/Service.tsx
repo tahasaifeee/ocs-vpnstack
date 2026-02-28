@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Server, FileText, Archive, Radio, Send,
+  Server, FileText, Archive, Radio, Send, Mail,
   CheckCircle2, XCircle, Loader2, RefreshCw, Download, Upload, RotateCcw,
 } from 'lucide-react'
 import { serviceApi } from '../api/client'
 import type {
   BackupInfo, ConfigValidationResult, ServiceStatus,
-  SIEMConfig, SyslogConfig,
+  SIEMConfig, SmtpConfig, SyslogConfig,
 } from '../types'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -437,6 +437,179 @@ function SiemCard() {
   )
 }
 
+// ── SMTP card ─────────────────────────────────────────────────────────────────
+
+function SmtpCard() {
+  const [form, setForm] = useState<SmtpConfig>({
+    enabled: false, host: '', port: 587, username: '', password: '',
+    from_email: '', from_name: 'VPN Dashboard', use_tls: true, use_ssl: false,
+  })
+  const [testEmail, setTestEmail] = useState('')
+  const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const { isLoading } = useQuery<SmtpConfig>({
+    queryKey: ['service-smtp'],
+    queryFn: serviceApi.getSmtp,
+    onSuccess: (d: SmtpConfig) => setForm(d),
+  } as any)
+
+  const saveMut = useMutation({
+    mutationFn: () => serviceApi.putSmtp(form),
+    onSuccess: () => setFeedback({ ok: true, msg: 'SMTP settings saved' }),
+    onError: (e: any) => setFeedback({ ok: false, msg: e?.response?.data?.detail ?? 'Save failed' }),
+  })
+
+  const testMut = useMutation({
+    mutationFn: () => serviceApi.testSmtp(testEmail),
+    onSuccess: () => setTestResult({ ok: true, msg: `Test email sent to ${testEmail}` }),
+    onError: (e: any) => setTestResult({ ok: false, msg: e?.response?.data?.detail ?? 'Send failed' }),
+  })
+
+  const set = (k: keyof SmtpConfig, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+
+  // When use_ssl is toggled on, disable use_tls (they're mutually exclusive)
+  const setSsl = (v: boolean) => setForm((f) => ({ ...f, use_ssl: v, use_tls: v ? false : f.use_tls }))
+  const setTls = (v: boolean) => setForm((f) => ({ ...f, use_tls: v, use_ssl: v ? false : f.use_ssl }))
+
+  if (isLoading) return <Card title="SMTP" icon={Mail}><Loader2 className="animate-spin text-gray-500" size={20} /></Card>
+
+  return (
+    <Card title="SMTP / Email" icon={Mail}>
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Toggle value={form.enabled} onChange={(v) => set('enabled', v)} />
+          <span className="text-sm text-gray-300">{form.enabled ? 'Enabled' : 'Disabled'}</span>
+        </div>
+
+        {form.enabled && (
+          <>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <Field label="SMTP host">
+                  <input
+                    className={inputCls}
+                    value={form.host}
+                    onChange={(e) => set('host', e.target.value)}
+                    placeholder="smtp.example.com"
+                  />
+                </Field>
+              </div>
+              <Field label="Port">
+                <input
+                  type="number"
+                  className={inputCls}
+                  value={form.port}
+                  onChange={(e) => set('port', Number(e.target.value))}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Encryption">
+                <div className="space-y-2 pt-1">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.use_tls}
+                      onChange={(e) => setTls(e.target.checked)}
+                      className="rounded"
+                    />
+                    STARTTLS (port 587)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.use_ssl}
+                      onChange={(e) => setSsl(e.target.checked)}
+                      className="rounded"
+                    />
+                    SSL/TLS (port 465)
+                  </label>
+                </div>
+              </Field>
+            </div>
+
+            <Field label="Username (leave blank if no auth required)">
+              <input
+                className={inputCls}
+                value={form.username}
+                onChange={(e) => set('username', e.target.value)}
+                placeholder="user@example.com"
+                autoComplete="off"
+              />
+            </Field>
+
+            <Field label="Password">
+              <input
+                type="password"
+                className={inputCls}
+                value={form.password}
+                onChange={(e) => set('password', e.target.value)}
+                autoComplete="new-password"
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="From email address">
+                <input
+                  className={inputCls}
+                  value={form.from_email}
+                  onChange={(e) => set('from_email', e.target.value)}
+                  placeholder="vpn@example.com"
+                />
+              </Field>
+              <Field label="From name">
+                <input
+                  className={inputCls}
+                  value={form.from_name}
+                  onChange={(e) => set('from_name', e.target.value)}
+                  placeholder="VPN Dashboard"
+                />
+              </Field>
+            </div>
+          </>
+        )}
+
+        {feedback && <Feedback ok={feedback.ok} msg={feedback.msg} />}
+
+        <button
+          onClick={() => { setFeedback(null); saveMut.mutate() }}
+          disabled={saveMut.isPending}
+          className={btnPrimary}
+        >
+          {saveMut.isPending ? <Loader2 size={14} className="inline animate-spin mr-1" /> : null}
+          Save
+        </button>
+
+        {form.enabled && (
+          <div className="border-t border-gray-800 pt-4 space-y-3">
+            <p className="text-sm text-gray-400">Send a test email to verify your settings:</p>
+            <div className="flex gap-2">
+              <input
+                className={`${inputCls} flex-1`}
+                type="email"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                placeholder="recipient@example.com"
+              />
+              <button
+                onClick={() => { setTestResult(null); testMut.mutate() }}
+                disabled={testMut.isPending || !testEmail}
+                className={btnSecondary}
+              >
+                {testMut.isPending ? <Loader2 size={14} className="inline animate-spin mr-1" /> : null}
+                Send test
+              </button>
+            </div>
+            {testResult && <Feedback ok={testResult.ok} msg={testResult.msg} />}
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Service() {
@@ -451,6 +624,9 @@ export default function Service() {
         </div>
         <SyslogCard />
         <SiemCard />
+        <div className="lg:col-span-2">
+          <SmtpCard />
+        </div>
       </div>
     </div>
   )

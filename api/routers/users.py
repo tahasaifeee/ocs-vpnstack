@@ -121,13 +121,14 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ):
-    user = await _get_user_or_404(username, db)
-    user = await db.execute(
+    result = await db.execute(
         select(VpnUser)
         .where(VpnUser.username == username)
         .options(selectinload(VpnUser.routes))
     )
-    user = user.scalar_one()
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
     if body.password is not None:
         await oc.ocpasswd_create(username, body.password)
@@ -151,11 +152,11 @@ async def update_user(
             user.otp_secret = None
             user.otp_enabled = False
 
-    if body.email is not None:
+    if "email" in body.model_fields_set:
         user.email = body.email
-    if body.quota_bytes is not None:
+    if "quota_bytes" in body.model_fields_set:
         user.quota_bytes = body.quota_bytes
-    if body.notes is not None:
+    if "notes" in body.model_fields_set:
         user.notes = body.notes
     if body.group_id is not None:
         grp = await db.execute(select(Group).where(Group.id == body.group_id))

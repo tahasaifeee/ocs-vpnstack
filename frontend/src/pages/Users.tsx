@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Power, Route, RefreshCw, Search } from 'lucide-react'
 import { usersApi, routesApi, groupsApi } from '../api/client'
@@ -16,6 +16,20 @@ function Badge({ active }: { active: boolean }) {
       <span className={`w-1.5 h-1.5 rounded-full ${active ? 'bg-green-400' : 'bg-gray-600'}`} />
       {active ? 'Active' : 'Disabled'}
     </span>
+  )
+}
+
+// ── OTP QR (fetched server-side — secret never leaves the API) ────────────────
+
+function OtpQrImage({ username }: { username: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['otp-qr', username],
+    queryFn: () => usersApi.otpQr(username),
+  })
+  if (isLoading) return <div className="w-48 h-48 mx-auto bg-gray-800 rounded animate-pulse" />
+  if (!data) return null
+  return (
+    <img src={data.qr_data_url} alt="OTP QR Code" className="w-48 h-48 mx-auto rounded bg-white p-1" />
   )
 }
 
@@ -71,13 +85,15 @@ function UserModal({
   const updateMut = useMutation({
     mutationFn: (data: Partial<typeof form>) =>
       usersApi.update(user!.username, {
-        ...data,
         password: data.password || undefined,
+        email: data.email || null,
         quota_bytes: data.quota_bytes ? +data.quota_bytes : null,
+        notes: data.notes || null,
         group_id: data.group_id ? +data.group_id : null,
         max_sessions: data.max_sessions ? +data.max_sessions : null,
         static_ip: data.static_ip || null,
         dns_servers: data.dns_servers || null,
+        otp_enabled: data.otp_enabled,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })
@@ -101,11 +117,7 @@ function UserModal({
           {created.otp_uri && (
             <div className="mb-4">
               <p className="text-sm text-gray-300 mb-2">Scan this QR with your authenticator app:</p>
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(created.otp_uri)}`}
-                alt="OTP QR Code"
-                className="w-48 h-48 mx-auto rounded"
-              />
+              <OtpQrImage username={created.username} />
               <p className="text-xs text-gray-500 mt-2 break-all text-center">{created.otp_secret}</p>
             </div>
           )}
@@ -244,12 +256,12 @@ function RoutesModal({ username, onClose }: { username: string; onClose: () => v
   })
 
   const [routes, setRoutes] = useState<{ cidr: string; is_excluded: boolean }[]>([])
-  const [loaded, setLoaded] = useState(false)
 
-  if (!loaded && existing.length > 0) {
-    setRoutes(existing.map((r) => ({ cidr: r.cidr, is_excluded: r.is_excluded })))
-    setLoaded(true)
-  }
+  useEffect(() => {
+    if (existing.length > 0) {
+      setRoutes(existing.map((r) => ({ cidr: r.cidr, is_excluded: r.is_excluded })))
+    }
+  }, [existing])
 
   const saveMut = useMutation({
     mutationFn: () => routesApi.set(username, routes),

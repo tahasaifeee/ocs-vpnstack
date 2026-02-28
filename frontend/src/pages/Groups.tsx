@@ -37,11 +37,11 @@ function GroupModal({ initial, onClose, onSave, saving }: ModalProps) {
   const submit = () => {
     const payload: Record<string, unknown> = { split_tunnel: split }
     if (!initial) payload.name = name
-    if (desc)    payload.description    = desc    || null
-    if (maxSess) payload.max_sessions   = Number(maxSess)  || null
-    if (quota)   payload.quota_bytes    = Math.round(Number(quota) * 1e9) || null
-    if (dns)     payload.dns_servers    = dns     || null
-    if (timeout) payload.session_timeout = Number(timeout) || null
+    payload.description     = desc    || null
+    payload.max_sessions    = maxSess ? Number(maxSess) : null
+    payload.quota_bytes     = quota   ? Math.round(Number(quota) * 1e9) : null
+    payload.dns_servers     = dns     || null
+    payload.session_timeout = timeout ? Number(timeout) : null
     onSave(payload)
   }
 

@@ -108,20 +108,27 @@ async def send_vpn_credentials(
     to_email: str,
     username: str,
     password: str,
-    server_host: str,
+    server_host: str = "",
+    client_url: str = "",
 ) -> None:
     """Send VPN credentials to a newly-created user."""
+    client_row = (
+        f'<tr><td><strong>VPN Client</strong></td>'
+        f'<td><a href="{client_url}">{client_url}</a></td></tr>'
+        if client_url else ""
+    )
     await send_email(
         to_email=to_email,
         subject="[VPN Dashboard] Your VPN account details",
         body_html=f"""
 <h2>Your VPN account has been created</h2>
 <table cellpadding="6" style="border-collapse:collapse;font-family:monospace">
-  <tr><td><strong>Server</strong></td><td>{server_host}</td></tr>
+  <tr><td><strong>Server</strong></td><td>{server_host or "—"}</td></tr>
+  <tr><td><strong>Protocol</strong></td><td>443/TCP (AnyConnect / OpenConnect)</td></tr>
   <tr><td><strong>Username</strong></td><td>{username}</td></tr>
   <tr><td><strong>Password</strong></td><td>{password}</td></tr>
-  <tr><td><strong>Protocol</strong></td><td>Cisco AnyConnect / OpenConnect</td></tr>
+  {client_row}
 </table>
-<p style="color:#666;font-size:13px">Keep this information confidential. Change your password after first login.</p>
+<p style="color:#666;font-size:13px">Keep this information confidential.</p>
 """,
     )

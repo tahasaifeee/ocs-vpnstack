@@ -29,6 +29,7 @@ from schemas import (
     SIEMConfig,
     SmtpConfig,
     SyslogConfig,
+    VpnClientSettings,
 )
 
 router = APIRouter(prefix="/service", tags=["service"])
@@ -400,3 +401,32 @@ async def test_smtp(
         return {"sent": True, "to": to}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+# ── VPN client settings ────────────────────────────────────────────────────────
+
+@router.get("/vpn-client", response_model=VpnClientSettings)
+async def get_vpn_client(
+    db: AsyncSession = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(["vpn_server_address", "vpn_client_url"]))
+    )
+    s = {r.key: r.value for r in result.scalars().all()}
+    return VpnClientSettings(
+        server_address=s.get("vpn_server_address", ""),
+        client_url=s.get("vpn_client_url", ""),
+    )
+
+
+@router.put("/vpn-client", response_model=VpnClientSettings)
+async def put_vpn_client(
+    body: VpnClientSettings,
+    db: AsyncSession = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+):
+    await _upsert(db, "vpn_server_address", body.server_address)
+    await _upsert(db, "vpn_client_url", body.client_url)
+    await db.commit()
+    return body

@@ -68,6 +68,8 @@ export const usersApi = {
   delete: (username: string) => api.delete(`/users/${username}`),
   disconnect: (username: string) => api.post(`/users/${username}/disconnect`),
   otpQr: (username: string) => api.get(`/users/${username}/otp-qr`).then((r) => r.data),
+  sendCredentials: (username: string, data: { to_email: string; password: string; server_host: string; client_url: string }) =>
+    api.post(`/users/${username}/send-credentials`, data).then((r) => r.data),
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -167,4 +169,6 @@ export const serviceApi = {
   getSmtp: () => api.get('/service/smtp').then((r) => r.data),
   putSmtp: (data: unknown) => api.put('/service/smtp', data).then((r) => r.data),
   testSmtp: (to: string) => api.post('/service/smtp/test', null, { params: { to } }).then((r) => r.data),
+  getVpnClient: () => api.get('/service/vpn-client').then((r) => r.data),
+  putVpnClient: (data: unknown) => api.put('/service/vpn-client', data).then((r) => r.data),
 }

@@ -11,8 +11,9 @@ from sqlalchemy.orm import selectinload
 from auth import get_current_admin
 from database import get_db
 from models import AdminUser, Group, VpnUser, AuditLog
-from schemas import VpnUserCreate, VpnUserOut, VpnUserUpdate, VpnUserWithOtp
+from schemas import VpnUserCreate, VpnUserOut, VpnUserUpdate, VpnUserWithOtp, SendCredentialsRequest
 import occtl as oc
+import mailer
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -237,3 +238,27 @@ async def otp_qr(
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
     return {"qr_data_url": f"data:image/png;base64,{b64}", "otp_uri": uri}
+
+
+@router.post("/{username}/send-credentials")
+async def send_credentials(
+    username: str,
+    body: SendCredentialsRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Email VPN credentials to the given address."""
+    if not mailer._smtp_cfg.get("enabled"):
+        raise HTTPException(status_code=400, detail="SMTP is not configured. Set it up in Service → SMTP.")
+    try:
+        await mailer.send_vpn_credentials(
+            to_email=body.to_email,
+            username=username,
+            password=body.password,
+            server_host=body.server_host,
+            client_url=body.client_url,
+        )
+        await _audit(db, admin, "send_credentials", username)
+        return {"sent": True}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))

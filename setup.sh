@@ -19,6 +19,7 @@ ask()     { echo -e "${YELLOW}  ?${RESET} $*"; }
 
 REPO_URL="https://github.com/tahasaifeee/ocs-vpnstack"
 INSTALL_DIR="${INSTALL_DIR:-/opt/ocs-vpnstack}"
+STATE_FILE="$INSTALL_DIR/.setup-state"   # persists port/host config across updates
 
 banner() {
   echo -e "${BOLD}${CYAN}"
@@ -320,6 +321,35 @@ ENV
   success ".env written"
 }
 
+# ── Persist / restore install state ──────────────────────────────────────────
+save_state() {
+  cat > "$STATE_FILE" <<STATE
+# ocs-vpnstack install state — written by setup.sh
+# Edit values here if you change ports on the host, then run: setup.sh --update
+SAVED_VPN_PORT=${VPN_PORT}
+SAVED_DASHBOARD_PORT=${DASHBOARD_PORT}
+SAVED_SERVER_HOST=${SERVER_HOST}
+SAVED_TLS_CHOICE=${TLS_CHOICE}
+SAVED_VPN_SUBNET=${VPN_SUBNET}
+INSTALL_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+STATE
+  success "Install state saved to $STATE_FILE"
+}
+
+load_state() {
+  if [ ! -f "$STATE_FILE" ]; then
+    error "State file not found at $STATE_FILE — was this installed via setup.sh?\nRun without --update to do a fresh install, or set INSTALL_DIR if you used a custom path."
+  fi
+  # shellcheck source=/dev/null
+  . "$STATE_FILE"
+  VPN_PORT="${SAVED_VPN_PORT:-443}"
+  DASHBOARD_PORT="${SAVED_DASHBOARD_PORT:-8443}"
+  SERVER_HOST="${SAVED_SERVER_HOST:-localhost}"
+  TLS_CHOICE="${SAVED_TLS_CHOICE:-1}"
+  VPN_SUBNET="${SAVED_VPN_SUBNET:-172.16.0.0/16}"
+  success "Loaded config: VPN=$VPN_PORT  Dashboard=$DASHBOARD_PORT  Host=$SERVER_HOST"
+}
+
 # ── Patch docker-compose ports ─────────────────────────────────────────────────
 patch_compose() {
   step "Patching docker-compose.yml with your port choices"
@@ -413,20 +443,212 @@ show_summary() {
   echo -e "  ${YELLOW}openconnect --user=<vpn-username> ${SERVER_HOST}:${VPN_PORT}${RESET}"
   echo ""
   echo -e "  ${BOLD}Manage services${RESET}"
+  echo -e "  ${INSTALL_DIR}/setup.sh --update     ${CYAN}# pull latest code & rebuild${RESET}"
+  echo -e "  ${INSTALL_DIR}/setup.sh --status     ${CYAN}# health + recent logs${RESET}"
+  echo -e "  ${INSTALL_DIR}/setup.sh --rebuild    ${CYAN}# force full image rebuild${RESET}"
+  echo -e "  ${INSTALL_DIR}/setup.sh --uninstall  ${CYAN}# remove everything${RESET}"
+  echo ""
+  echo -e "  ${BOLD}Docker shortcuts${RESET}"
   echo -e "  cd ${INSTALL_DIR}"
-  echo -e "  docker compose logs -f          # tail logs"
-  echo -e "  docker compose ps               # service status"
-  echo -e "  docker compose down             # stop everything"
-  echo -e "  docker compose up -d --build    # rebuild & restart"
+  echo -e "  docker compose logs -f api       ${CYAN}# tail API logs${RESET}"
+  echo -e "  docker compose ps                ${CYAN}# service status${RESET}"
+  echo -e "  docker compose down              ${CYAN}# stop everything${RESET}"
   echo ""
   if [ "$TLS_CHOICE" = "1" ]; then
     echo -e "  ${YELLOW}Note: Using a self-signed certificate. Your browser will show${RESET}"
     echo -e "  ${YELLOW}a security warning — click 'Advanced' → 'Proceed' to continue.${RESET}"
     echo ""
   fi
-  echo -e "  ${BOLD}Logs${RESET}"
-  echo -e "  ${INSTALL_DIR}/ — installation directory"
-  echo -e "  ${INSTALL_DIR}/.env — secrets (keep this safe!)"
+  echo -e "  ${BOLD}Files${RESET}"
+  echo -e "  ${INSTALL_DIR}/.env         — secrets (keep this safe!)"
+  echo -e "  ${INSTALL_DIR}/.setup-state — port/host config used by --update"
+  echo ""
+}
+
+# ── Update ────────────────────────────────────────────────────────────────────
+update() {
+  step "ocs-vpnstack Updater"
+
+  # 1. Verify installation
+  [ -d "$INSTALL_DIR/.git" ] || \
+    error "No installation found at $INSTALL_DIR.\nSet INSTALL_DIR or run without --update to install fresh."
+
+  load_state
+
+  cd "$INSTALL_DIR"
+
+  # 2. Fetch remote changes
+  step "Checking for updates"
+  local DEFAULT_BRANCH
+  DEFAULT_BRANCH=$(git -C "$INSTALL_DIR" remote show origin 2>/dev/null | \
+    grep 'HEAD branch' | awk '{print $NF}')
+  DEFAULT_BRANCH="${DEFAULT_BRANCH:-master}"
+
+  git fetch origin "$DEFAULT_BRANCH" --quiet || \
+    error "Failed to fetch from remote. Check your internet connection."
+
+  local CURRENT_SHA NEW_SHA
+  CURRENT_SHA=$(git rev-parse HEAD)
+  NEW_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
+
+  if [ "$CURRENT_SHA" = "$NEW_SHA" ]; then
+    success "Already up to date ($(git rev-parse --short HEAD)). Nothing to do."
+    echo ""
+    echo -e "  To force a rebuild without new code: ${CYAN}setup.sh --rebuild${RESET}"
+    exit 0
+  fi
+
+  # 3. Show incoming changelog
+  echo ""
+  echo -e "${BOLD}Incoming changes:${RESET}"
+  git log --oneline --no-walk --ancestry-path \
+    "${CURRENT_SHA}..origin/${DEFAULT_BRANCH}" 2>/dev/null | \
+    head -20 | while IFS= read -r line; do
+      echo -e "  ${CYAN}·${RESET} $line"
+    done
+  CHANGE_COUNT=$(git rev-list --count "${CURRENT_SHA}..origin/${DEFAULT_BRANCH}")
+  echo ""
+  info "$CHANGE_COUNT new commit(s) will be applied"
+
+  # 4. Detect which services have changed (so we can rebuild only those)
+  local CHANGED_SERVICES=()
+  local CHANGED_FILES
+  CHANGED_FILES=$(git diff --name-only "${CURRENT_SHA}..origin/${DEFAULT_BRANCH}" 2>/dev/null)
+
+  echo "$CHANGED_FILES" | grep -q '^api/'      && CHANGED_SERVICES+=("api")
+  echo "$CHANGED_FILES" | grep -q '^frontend/' && CHANGED_SERVICES+=("frontend")
+  echo "$CHANGED_FILES" | grep -q '^ocserv/'   && CHANGED_SERVICES+=("ocserv")
+
+  if [ ${#CHANGED_SERVICES[@]} -eq 0 ]; then
+    CHANGED_SERVICES=("api" "frontend" "ocserv")   # config-only change — rebuild all
+  fi
+
+  info "Services requiring rebuild: ${CHANGED_SERVICES[*]}"
+  echo ""
+
+  # 5. Confirm with user
+  ask "Proceed with update? [Y/n]"
+  read -r CONFIRM
+  CONFIRM="${CONFIRM:-y}"
+  [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Update cancelled."; exit 0; }
+
+  # 6. Backup .env
+  step "Backing up configuration"
+  cp "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.bak.$(date +%Y%m%d%H%M%S)"
+  success ".env backed up"
+
+  # 7. Reset docker-compose.yml to the git version so pull is clean
+  #    (we patch it after pulling fresh code)
+  git checkout HEAD -- docker-compose.yml 2>/dev/null || true
+
+  # 8. Pull new code
+  step "Pulling latest code"
+  git pull origin "$DEFAULT_BRANCH" --ff-only
+  success "Code updated to $(git rev-parse --short HEAD)"
+
+  # 9. Restore .env (pull never touches it since it's .gitignored, but be safe)
+  [ -f "$INSTALL_DIR/.env" ] || \
+    cp "$INSTALL_DIR/.env.bak."* "$INSTALL_DIR/.env" 2>/dev/null || \
+    warn ".env missing — you may need to re-create it from .env.example"
+
+  # 10. Re-apply port patches with saved values
+  step "Re-applying port configuration"
+  sed -i "s|\"443:443/tcp\"|\"${VPN_PORT}:443/tcp\"|g"   docker-compose.yml
+  sed -i "s|\"443:443/udp\"|\"${VPN_PORT}:443/udp\"|g"   docker-compose.yml
+  sed -i "s|\"8443:8443\"|\"${DASHBOARD_PORT}:8443\"|g"  docker-compose.yml
+  success "Ports re-applied (VPN: $VPN_PORT, Dashboard: $DASHBOARD_PORT)"
+
+  # 11. Pull updated base images
+  step "Pulling updated base images"
+  ${DOCKER_SUDO:-} docker compose pull --quiet 2>/dev/null || true
+
+  # 12. Rolling rebuild — only rebuild changed services, then restart
+  step "Rebuilding changed services: ${CHANGED_SERVICES[*]}"
+  ${DOCKER_SUDO:-} docker compose build --pull --no-cache "${CHANGED_SERVICES[@]}"
+
+  # 13. Restart changed services one at a time (keeps VPN up during api/frontend rebuild)
+  step "Restarting services with minimal downtime"
+  for SVC in "${CHANGED_SERVICES[@]}"; do
+    info "Restarting $SVC…"
+    ${DOCKER_SUDO:-} docker compose up -d --no-deps "$SVC"
+    sleep 2
+  done
+
+  # Ensure any new services from docker-compose.yml are started too
+  ${DOCKER_SUDO:-} docker compose up -d --remove-orphans
+
+  # 14. Health check
+  wait_for_api
+
+  # 15. Update state file with latest commit
+  echo "LAST_UPDATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$STATE_FILE"
+  echo "LAST_COMMIT=$(git rev-parse --short HEAD)"        >> "$STATE_FILE"
+
+  show_update_summary
+}
+
+# ── Force rebuild (no code change needed) ────────────────────────────────────
+rebuild() {
+  step "Force Rebuild"
+  [ -d "$INSTALL_DIR/.git" ] || error "No installation found at $INSTALL_DIR."
+  load_state
+  cd "$INSTALL_DIR"
+
+  ask "This will rebuild all Docker images and restart services. Continue? [Y/n]"
+  read -r CONFIRM
+  CONFIRM="${CONFIRM:-y}"
+  [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; exit 0; }
+
+  step "Rebuilding all images"
+  ${DOCKER_SUDO:-} docker compose build --pull --no-cache
+  ${DOCKER_SUDO:-} docker compose up -d --remove-orphans
+
+  wait_for_api
+  success "Rebuild complete — running commit $(git rev-parse --short HEAD)"
+}
+
+# ── Show service status ───────────────────────────────────────────────────────
+status() {
+  [ -d "$INSTALL_DIR" ] || error "No installation found at $INSTALL_DIR."
+  load_state
+
+  step "Service Status"
+  cd "$INSTALL_DIR"
+  ${DOCKER_SUDO:-} docker compose ps
+  echo ""
+
+  step "Recent Logs (last 20 lines per service)"
+  for SVC in ocserv api frontend postgres redis nginx; do
+    echo -e "\n${BOLD}── $SVC ──${RESET}"
+    ${DOCKER_SUDO:-} docker compose logs --tail=20 --no-log-prefix "$SVC" 2>/dev/null | \
+      tail -5 || true
+  done
+  echo ""
+
+  step "Current Version"
+  git -C "$INSTALL_DIR" log --oneline -1 2>/dev/null || echo "  (unknown)"
+  echo ""
+
+  info "Dashboard : https://${SERVER_HOST}:${DASHBOARD_PORT}"
+  info "VPN       : ${SERVER_HOST}:${VPN_PORT}"
+}
+
+# ── Show update summary ───────────────────────────────────────────────────────
+show_update_summary() {
+  echo ""
+  echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════╗${RESET}"
+  echo -e "${BOLD}${GREEN}║         ✓  Update applied successfully!              ║${RESET}"
+  echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════╝${RESET}"
+  echo ""
+  echo -e "  ${BOLD}Running version${RESET} : $(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+  echo -e "  ${BOLD}Dashboard${RESET}       : ${CYAN}https://${SERVER_HOST}:${DASHBOARD_PORT}${RESET}"
+  echo -e "  ${BOLD}VPN${RESET}             : ${SERVER_HOST}:${VPN_PORT}"
+  echo ""
+  echo -e "  ${BOLD}Useful commands${RESET}"
+  echo -e "  ${INSTALL_DIR}/setup.sh --update    # update again next time"
+  echo -e "  ${INSTALL_DIR}/setup.sh --status    # check service health"
+  echo -e "  ${INSTALL_DIR}/setup.sh --rebuild   # force full image rebuild"
+  echo -e "  cd ${INSTALL_DIR} && docker compose logs -f api"
   echo ""
 }
 
@@ -468,12 +690,53 @@ open_firewall() {
 DOCKER_SUDO=""
 
 case "${1:-}" in
-  --uninstall|-u) require_root_or_sudo; uninstall ;;
+  --update|-U)
+    banner
+    require_root_or_sudo
+    update
+    exit 0
+    ;;
+  --rebuild|-r)
+    banner
+    require_root_or_sudo
+    rebuild
+    exit 0
+    ;;
+  --status|-s)
+    banner
+    require_root_or_sudo
+    status
+    exit 0
+    ;;
+  --uninstall|-u)
+    banner
+    require_root_or_sudo
+    uninstall
+    ;;
   --help|-h)
-    echo "Usage: bash setup.sh [--uninstall | --help]"
     echo ""
-    echo "Environment variables:"
-    echo "  INSTALL_DIR   Where to clone/use the repo (default: /opt/ocs-vpnstack)"
+    echo -e "${BOLD}Usage:${RESET}  bash setup.sh [OPTION]"
+    echo ""
+    echo -e "  ${BOLD}(no args)${RESET}          Fresh install — interactive prompts"
+    echo -e "  ${BOLD}--update,  -U${RESET}      Pull latest code and rebuild changed services"
+    echo -e "  ${BOLD}--rebuild, -r${RESET}      Force full Docker image rebuild (no code pull)"
+    echo -e "  ${BOLD}--status,  -s${RESET}      Show service health and recent logs"
+    echo -e "  ${BOLD}--uninstall,-u${RESET}     Remove all containers, volumes, and files"
+    echo -e "  ${BOLD}--help,    -h${RESET}      Show this help"
+    echo ""
+    echo -e "${BOLD}Environment variables:${RESET}"
+    echo -e "  INSTALL_DIR   Installation path (default: /opt/ocs-vpnstack)"
+    echo ""
+    echo -e "${BOLD}Examples:${RESET}"
+    echo -e "  # Fresh install"
+    echo -e "  bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)"
+    echo ""
+    echo -e "  # Update an existing install"
+    echo -e "  bash /opt/ocs-vpnstack/setup.sh --update"
+    echo ""
+    echo -e "  # Custom install directory"
+    echo -e "  INSTALL_DIR=/srv/vpn bash <(curl -fsSL https://raw.githubusercontent.com/tahasaifeee/ocs-vpnstack/master/setup.sh)"
+    echo ""
     exit 0
     ;;
 esac
@@ -490,6 +753,7 @@ collect_config
 generate_certs
 write_env
 patch_compose
+save_state
 start_services
 wait_for_api
 set_admin_password

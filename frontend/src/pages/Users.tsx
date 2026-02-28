@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Power, QrCode, Route, RefreshCw, Search } from 'lucide-react'
+import { Plus, Trash2, Power, Route, RefreshCw, Search } from 'lucide-react'
 import { usersApi, routesApi } from '../api/client'
 import type { VpnUser, VpnUserWithOtp, Route as VpnRoute } from '../types'
 

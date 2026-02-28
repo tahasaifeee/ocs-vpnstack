@@ -11,6 +11,11 @@ chmod +x /etc/ocserv/connect.sh /etc/ocserv/disconnect.sh
 # Ensure required dirs exist (volume mount may be fresh)
 mkdir -p /etc/ocserv/conf.d /etc/ocserv/user-routes /run/ocserv
 
+# ocserv plain-auth requires both files to exist (even if empty) before it
+# will initialise its auth module and create the control socket.
+[ -f /etc/ocserv/ocpasswd   ] || touch /etc/ocserv/ocpasswd
+[ -f /etc/ocserv/users.oath ] || touch /etc/ocserv/users.oath
+
 # Generate self-signed cert on first start (or if wiped)
 if [ ! -f /etc/ocserv/server.crt ]; then
     certtool --generate-privkey --outfile /etc/ocserv/server.key

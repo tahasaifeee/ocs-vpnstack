@@ -2,10 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for ocpasswd/occtl subprocess calls
+# System deps: ocserv provides ocpasswd + occtl binaries used at runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
+    ocserv \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

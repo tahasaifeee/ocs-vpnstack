@@ -15,6 +15,7 @@ services:
       - "443:443/udp"
     volumes:
       - ocserv-config:/etc/ocserv
+      - ocserv-run:/run/ocserv
     networks:
       - vpn-net
     restart: unless-stopped
@@ -35,6 +36,7 @@ services:
       OCSERV_CONFIG_DIR: "/etc/ocserv"
     volumes:
       - ocserv-config:/etc/ocserv
+      - ocserv-run:/run/ocserv
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,6 +108,7 @@ services:
 
 volumes:
   ocserv-config:
+  ocserv-run:
   postgres-data:
   redis-data:
 

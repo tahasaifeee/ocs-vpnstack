@@ -20,10 +20,15 @@ services:
       - vpn-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "occtl", "--socket-file", "/run/ocserv/ocserv.sock", "show", "status"]
+      # ocserv creates the socket only once it is fully initialised and ready
+      # to accept connections.  Querying `occtl show status` is unreliable at
+      # startup (the main worker may not be ready yet); testing the socket
+      # file is simpler, faster, and equally authoritative.
+      test: ["CMD-SHELL", "test -S /run/ocserv/ocserv.sock"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # ── FastAPI backend ──────────────────────────────────────────────────────────
   api:

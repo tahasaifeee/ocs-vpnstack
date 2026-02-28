@@ -381,18 +381,38 @@ start_services() {
 # ── Wait for API ──────────────────────────────────────────────────────────────
 wait_for_api() {
   step "Waiting for API to become healthy"
-  local MAX=60 COUNT=0
+
+  # Port 8000 is NOT exposed to the host — only reachable inside vpn-net.
+  # Primary strategy: poll Docker's own container healthcheck status.
+  # Fallback: reach the API through nginx at :DASHBOARD_PORT/api/healthz.
+  local MAX=90 COUNT=0 HEALTH
+
   while [ $COUNT -lt $MAX ]; do
-    if curl -fsSL --max-time 3 "http://127.0.0.1:8000/healthz" &>/dev/null; then
-      success "API is up"
-      return
+    HEALTH=$(${DOCKER_SUDO:-} docker compose ps --format '{{.Health}}' api 2>/dev/null \
+             | head -1 || true)
+
+    if [ "$HEALTH" = "healthy" ]; then
+      echo ""
+      success "API is healthy (Docker health check passed)"
+      return 0
     fi
-    COUNT=$((COUNT + 2))
-    printf "\r  Waiting… %ds / %ds" "$COUNT" "$MAX"
-    sleep 2
+
+    # Fallback: try via nginx reverse-proxy (available from the host)
+    if curl -fsSL -k --max-time 3 \
+        "https://127.0.0.1:${DASHBOARD_PORT:-8443}/api/healthz" &>/dev/null; then
+      echo ""
+      success "API is reachable via nginx proxy"
+      return 0
+    fi
+
+    COUNT=$((COUNT + 3))
+    printf "\r  Waiting… %ds / %ds  (container: %s)" "$COUNT" "$MAX" "${HEALTH:-starting}"
+    sleep 3
   done
+
   echo ""
-  warn "API did not respond within ${MAX}s — check logs with: docker compose -f $INSTALL_DIR/docker-compose.yml logs api"
+  warn "API did not become healthy within ${MAX}s — check logs with:"
+  warn "  docker compose -f $INSTALL_DIR/docker-compose.yml logs api"
 }
 
 # ── Change Default Admin Password ─────────────────────────────────────────────

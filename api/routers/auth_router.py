@@ -12,7 +12,7 @@ from auth import (
 )
 from database import get_db
 from models import AdminUser
-from schemas import LoginRequest, RefreshRequest, TokenResponse
+from schemas import LoginRequest, RefreshRequest, TokenResponse, AdminUpdateRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -46,4 +46,27 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me")
 async def me(admin: AdminUser = Depends(get_current_admin)):
+    return {"username": admin.username, "id": admin.id}
+
+
+@router.patch("/me")
+async def update_me(
+    body: AdminUpdateRequest,
+    admin: AdminUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the currently-authenticated admin's username and/or password."""
+    if not verify_password(body.current_password, admin.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+    if body.new_username is not None and body.new_username != admin.username:
+        taken = await db.execute(select(AdminUser).where(AdminUser.username == body.new_username))
+        if taken.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
+        admin.username = body.new_username
+
+    if body.new_password is not None:
+        admin.hashed_password = hash_password(body.new_password)
+
+    await db.commit()
     return {"username": admin.username, "id": admin.id}

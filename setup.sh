@@ -398,32 +398,60 @@ wait_for_api() {
 # ── Change Default Admin Password ─────────────────────────────────────────────
 set_admin_password() {
   step "Configuring dashboard admin account"
-  # The API seeds 'admin'/'admin' on first boot. We update it via the REST API.
-  local TOKEN
-  TOKEN=$(curl -fsSL -X POST "http://127.0.0.1:8000/auth/login" \
-    -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin"}' 2>/dev/null | \
-    grep -o '"access_token":"[^"]*"' | cut -d'"' -f4) || true
 
-  if [ -z "$TOKEN" ]; then
-    warn "Could not authenticate as default admin to change password — you may need to do this manually."
-    return
+  # Strategy: run a Python snippet inside the already-running API container.
+  # This uses the exact same passlib/bcrypt hash_password() the API uses, so
+  # the stored hash is always compatible.  Credentials are passed as
+  # environment variables (never interpolated into Python source) so special
+  # characters in passwords are handled safely.
+  _exec_admin_update() {
+    ${DOCKER_SUDO:-} docker compose -f "$INSTALL_DIR/docker-compose.yml" \
+      exec -T \
+      -e _NEW_USER="${ADMIN_USER}" \
+      -e _NEW_PASS="${ADMIN_PASS}" \
+      api python -c "
+import asyncio, os
+from auth import hash_password
+from database import AsyncSessionLocal
+from models import AdminUser
+from sqlalchemy import select
+
+async def run():
+    new_user = os.environ['_NEW_USER']
+    new_pass = os.environ['_NEW_PASS']
+    hashed   = hash_password(new_pass)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(AdminUser).where(AdminUser.username == 'admin'))
+        admin = result.scalar_one_or_none()
+        if admin is None:
+            print('NOTFOUND', flush=True)
+            return
+        admin.username        = new_user
+        admin.hashed_password = hashed
+        await db.commit()
+        print('OK', flush=True)
+
+asyncio.run(run())
+" 2>&1
+  }
+
+  local OUT
+  OUT=$(_exec_admin_update) || true
+
+  # Retry once if the seed row isn't in the DB yet (race on first boot)
+  if echo "$OUT" | grep -q "NOTFOUND"; then
+    warn "Admin seed row not found — retrying in 5s…"
+    sleep 5
+    OUT=$(_exec_admin_update) || true
   fi
 
-  # If admin username is not 'admin', we can't rename via API (not implemented).
-  # We will just update the password.
-  curl -fsSL -X PATCH "http://127.0.0.1:8000/users" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"password\":\"${ADMIN_PASS}\"}" &>/dev/null || true
-
-  # Best-effort direct DB update via docker exec
-  ${DOCKER_SUDO:-} docker compose -f "$INSTALL_DIR/docker-compose.yml" exec -T postgres \
-    psql -U vpnuser -d vpndb -c \
-    "UPDATE admin_users SET username='${ADMIN_USER}', hashed_password=crypt('${ADMIN_PASS}', gen_salt('bf')) WHERE username='admin';" \
-    &>/dev/null 2>&1 || true
-
-  success "Admin account configured (user: ${ADMIN_USER})"
+  if echo "$OUT" | grep -q "^OK"; then
+    success "Admin account configured (user: ${ADMIN_USER})"
+  else
+    warn "Could not set admin credentials automatically."
+    [ -n "$OUT" ] && info "  Detail: $OUT"
+    warn "  → Log in with  admin / admin  and use PATCH /auth/me to update."
+  fi
 }
 
 # ── Show Summary ──────────────────────────────────────────────────────────────

@@ -16,6 +16,12 @@ class TokenResponse(BaseModel):
 class RefreshRequest(BaseModel):
     refresh_token: str
 
+class AdminUpdateRequest(BaseModel):
+    """Used by PATCH /auth/me to change the dashboard admin's own credentials."""
+    current_password: str
+    new_password: str | None = Field(None, min_length=8)
+    new_username: str | None = Field(None, min_length=1, max_length=64)
+
 
 # ── VPN Users ─────────────────────────────────────────────────────────────────
 

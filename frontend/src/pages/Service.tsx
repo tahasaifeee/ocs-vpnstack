@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Server, FileText, Archive, Radio, Send, Mail,
@@ -305,11 +305,12 @@ function SyslogCard() {
   })
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
 
-  const { isLoading } = useQuery<SyslogConfig>({
+  const { isLoading, data: syslogData } = useQuery<SyslogConfig>({
     queryKey: ['service-syslog'],
     queryFn: serviceApi.getSyslog,
-    onSuccess: (d: SyslogConfig) => setForm(d),
-  } as any)
+  })
+
+  useEffect(() => { if (syslogData) setForm(syslogData) }, [syslogData])
 
   const mut = useMutation({
     mutationFn: () => serviceApi.putSyslog(form),
@@ -368,11 +369,12 @@ function SiemCard() {
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
-  const { isLoading } = useQuery<SIEMConfig>({
+  const { isLoading, data: siemData } = useQuery<SIEMConfig>({
     queryKey: ['service-siem'],
     queryFn: serviceApi.getSiem,
-    onSuccess: (d: SIEMConfig) => setForm(d),
-  } as any)
+  })
+
+  useEffect(() => { if (siemData) setForm(siemData) }, [siemData])
 
   const saveMut = useMutation({
     mutationFn: () => serviceApi.putSiem(form),
@@ -448,11 +450,12 @@ function SmtpCard() {
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
-  const { isLoading } = useQuery<SmtpConfig>({
+  const { isLoading, data: smtpData } = useQuery<SmtpConfig>({
     queryKey: ['service-smtp'],
     queryFn: serviceApi.getSmtp,
-    onSuccess: (d: SmtpConfig) => setForm(d),
-  } as any)
+  })
+
+  useEffect(() => { if (smtpData) setForm(smtpData) }, [smtpData])
 
   const saveMut = useMutation({
     mutationFn: () => serviceApi.putSmtp(form),

@@ -126,7 +126,7 @@ def _oath_write(username: str, secret_hex: str) -> None:
     oath_path = Path(settings.oath_file)
     lines = oath_path.read_text().splitlines() if oath_path.exists() else []
     new_line = f"HOTP/T30 {username} - {secret_hex}"
-    updated = [l for l in lines if not (l.strip() and l.split()[1] == username)] + [new_line]
+    updated = [l for l in lines if not (l.strip() and len(l.split()) > 1 and l.split()[1] == username)] + [new_line]
     oath_path.write_text("\n".join(updated) + "\n")
 
 
@@ -140,7 +140,7 @@ def _oath_remove_sync(username: str) -> None:
     if not oath_path.exists():
         return
     lines = oath_path.read_text().splitlines()
-    kept = [l for l in lines if not (l.strip() and l.split()[1] == username)]
+    kept = [l for l in lines if not (l.strip() and len(l.split()) > 1 and l.split()[1] == username)]
     oath_path.write_text("\n".join(kept) + "\n")
 
 

@@ -91,7 +91,7 @@ async def update_group(
     _: AdminUser = Depends(get_current_admin),
 ):
     group = await _get_group_or_404(group_id, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(group, field, value)
     await db.commit()
     await db.refresh(group)

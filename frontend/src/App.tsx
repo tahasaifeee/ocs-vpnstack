@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Users from './pages/Users'
 import Sessions from './pages/Sessions'
 import Stats from './pages/Stats'
+import Settings from './pages/Settings'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.accessToken)
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="users" element={<Users />} />
         <Route path="sessions" element={<Sessions />} />
         <Route path="stats" element={<Stats />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

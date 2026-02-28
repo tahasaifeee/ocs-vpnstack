@@ -8,7 +8,8 @@ interface AuthState {
   accessToken: string | null
   refreshToken: string | null
   adminUsername: string | null
-  login: (username: string, password: string) => Promise<void>
+  /** 'requires_totp' returned when credentials OK but 2FA code still needed */
+  login: (username: string, password: string, totpCode?: string) => Promise<'ok' | 'requires_totp'>
   refresh: () => Promise<void>
   logout: () => void
 }
@@ -20,13 +21,19 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       adminUsername: null,
 
-      login: async (username, password) => {
-        const { data } = await axios.post(`${BASE_URL}/auth/login`, { username, password })
+      login: async (username, password, totpCode?) => {
+        const { data } = await axios.post(`${BASE_URL}/auth/login`, {
+          username,
+          password,
+          totp_code: totpCode ?? null,
+        })
+        if (data.requires_totp) return 'requires_totp'
         set({
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
           adminUsername: username,
         })
+        return 'ok'
       },
 
       refresh: async () => {

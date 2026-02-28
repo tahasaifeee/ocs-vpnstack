@@ -3,11 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import select, text
+
 from database import engine, Base
 from models import AdminUser  # ensure tables are registered
 from auth import hash_password
 from database import AsyncSessionLocal
-from sqlalchemy import select
 
 from routers.auth_router import router as auth_router
 from routers.users import router as users_router
@@ -22,6 +23,13 @@ async def lifespan(app: FastAPI):
     # Create all tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Idempotent column migrations for existing installs
+        await conn.execute(text(
+            "ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)"
+        ))
 
     # Seed default admin if none exists
     async with AsyncSessionLocal() as db:

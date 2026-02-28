@@ -12,6 +12,11 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// Single in-flight refresh promise so concurrent 401s share one refresh call
+// instead of each independently racing to refresh (which can cause some to see
+// a null refreshToken and trigger logout mid-race).
+let refreshingPromise: Promise<void> | null = null
+
 // Auto-refresh on 401
 api.interceptors.response.use(
   (r) => r,
@@ -20,7 +25,12 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true
       try {
-        await useAuthStore.getState().refresh()
+        if (!refreshingPromise) {
+          refreshingPromise = useAuthStore.getState().refresh().finally(() => {
+            refreshingPromise = null
+          })
+        }
+        await refreshingPromise
         const token = useAuthStore.getState().accessToken
         original.headers.Authorization = `Bearer ${token}`
         return api(original)

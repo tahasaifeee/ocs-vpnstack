@@ -103,3 +103,26 @@ class AuditLog(Base):
     target: Mapped[str | None] = mapped_column(String(128), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuthLog(Base):
+    """Authentication attempt log (success and failure)."""
+    __tablename__ = "auth_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean)
+    failure_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class SystemSetting(Base):
+    """Persistent key-value store for runtime configuration (syslog, SIEM, etc.)."""
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

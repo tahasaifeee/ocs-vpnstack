@@ -9,6 +9,9 @@ import Stats from './pages/Stats'
 import Settings from './pages/Settings'
 import Groups from './pages/Groups'
 import Network from './pages/Network'
+import Logs from './pages/Logs'
+import Reports from './pages/Reports'
+import Service from './pages/Service'
 
 /**
  * On every page load, if we have a refresh token but no access token (the
@@ -80,6 +83,9 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="groups"   element={<Groups />} />
           <Route path="network"  element={<Network />} />
+          <Route path="logs"     element={<Logs />} />
+          <Route path="reports"  element={<Reports />} />
+          <Route path="service"  element={<Service />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

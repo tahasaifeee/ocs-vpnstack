@@ -198,3 +198,99 @@ class DisconnectEvent(BaseModel):
     bytes_out: int = 0
     duration: int = 0
     reason: str | None = None
+
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+
+class AuthLogOut(BaseModel):
+    id: int
+    username: str
+    ip_address: str | None
+    success: bool
+    failure_reason: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    admin_username: str
+    action: str
+    target: str | None
+    detail: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Reports ───────────────────────────────────────────────────────────────────
+
+class DailyStatOut(BaseModel):
+    date: str
+    total_sessions: int
+    total_bytes_in: int
+    total_bytes_out: int
+    unique_users: int
+
+
+class MonthlyStatOut(BaseModel):
+    month: str
+    total_sessions: int
+    total_bytes_in: int
+    total_bytes_out: int
+    unique_users: int
+
+
+class HourlyStatOut(BaseModel):
+    hour: int
+    session_count: int
+
+
+class TopUserOut(BaseModel):
+    username: str
+    total_bytes: int
+    total_sessions: int
+
+
+class LoginFailureStatOut(BaseModel):
+    username: str
+    failure_count: int
+    last_attempt: datetime | None
+
+
+# ── Service ───────────────────────────────────────────────────────────────────
+
+class ServiceStatusOut(BaseModel):
+    ocserv_running: bool
+    active_connections: int
+    version: str | None
+    uptime: str | None
+
+
+class ConfigValidationResult(BaseModel):
+    valid: bool
+    errors: list[str]
+    warnings: list[str]
+
+
+class BackupInfo(BaseModel):
+    filename: str
+    size_bytes: int
+    created_at: str
+
+
+class SyslogConfig(BaseModel):
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 514
+    protocol: str = "udp"   # "udp" | "tcp"
+    facility: str = "local0"
+
+
+class SIEMConfig(BaseModel):
+    enabled: bool = False
+    url: str = ""
+    format: str = "json"    # "json" | "gelf" | "splunk-hec"
+    token: str = ""
+    verify_ssl: bool = True

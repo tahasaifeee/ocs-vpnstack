@@ -79,3 +79,99 @@ export interface NetworkConfig {
   ipv6_network: string | null
   tunnel_all_dns: boolean
 }
+
+// ── Auth / Audit Logs ─────────────────────────────────────────────────────────
+
+export interface AuthLog {
+  id: number
+  username: string
+  ip_address: string | null
+  success: boolean
+  failure_reason: string | null
+  created_at: string
+}
+
+export interface AuditLog {
+  id: number
+  admin_username: string
+  action: string
+  target: string | null
+  detail: string | null
+  created_at: string
+}
+
+export interface SessionLogWithUser extends SessionLog {
+  username: string
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+export interface DailyStat {
+  date: string
+  total_sessions: number
+  total_bytes_in: number
+  total_bytes_out: number
+  unique_users: number
+}
+
+export interface MonthlyStat {
+  month: string
+  total_sessions: number
+  total_bytes_in: number
+  total_bytes_out: number
+  unique_users: number
+}
+
+export interface TopUser {
+  username: string
+  total_bytes: number
+  total_sessions: number
+}
+
+export interface LoginFailureStat {
+  username: string
+  failure_count: number
+  last_attempt: string | null
+}
+
+export interface HourlyStat {
+  hour: number
+  session_count: number
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+export interface ServiceStatus {
+  ocserv_running: boolean
+  active_connections: number
+  version: string | null
+  uptime: string | null
+}
+
+export interface ConfigValidationResult {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+export interface BackupInfo {
+  filename: string
+  size_bytes: number
+  created_at: string
+}
+
+export interface SyslogConfig {
+  enabled: boolean
+  host: string
+  port: number
+  protocol: string
+  facility: string
+}
+
+export interface SIEMConfig {
+  enabled: boolean
+  url: string
+  format: string
+  token: string
+  verify_ssl: boolean
+}

@@ -55,7 +55,7 @@ function PasswordCard() {
 
   const mut = useMutation({
     mutationFn: authApi.updateMe,
-    onSuccess: (data) => {
+    onSuccess: () => {
       setFeedback({ ok: true, msg: 'Changes saved. Please log in again.' })
       setCurrentPw(''); setNewPw(''); setConfirmPw(''); setNewUsername('')
       // If username changed, force re-login

@@ -294,3 +294,15 @@ class SIEMConfig(BaseModel):
     format: str = "json"    # "json" | "gelf" | "splunk-hec"
     token: str = ""
     verify_ssl: bool = True
+
+
+class SmtpConfig(BaseModel):
+    enabled: bool = False
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password: str = ""
+    from_email: str = ""
+    from_name: str = "VPN Dashboard"
+    use_tls: bool = True      # STARTTLS on port 587
+    use_ssl: bool = False     # Implicit SSL on port 465

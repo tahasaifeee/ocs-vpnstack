@@ -11,6 +11,7 @@ from models import AdminUser, AuthLog, Group, SystemSetting  # ensure all tables
 from auth import hash_password
 import redis_client
 import siem
+import mailer
 
 from routers.auth_router import router as auth_router
 from routers.users import router as users_router
@@ -79,6 +80,25 @@ async def lifespan(app: FastAPI):
             "format": s2.get("siem_format", "json"),
             "token": s2.get("siem_token", ""),
             "verify_ssl": s2.get("siem_verify_ssl", "true").lower() == "true",
+        })
+
+        # Load SMTP config from DB and cache
+        smtp_keys = [
+            "smtp_enabled", "smtp_host", "smtp_port", "smtp_username", "smtp_password",
+            "smtp_from_email", "smtp_from_name", "smtp_use_tls", "smtp_use_ssl",
+        ]
+        res3 = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(smtp_keys)))
+        s3 = {r.key: r.value for r in res3.scalars().all()}
+        mailer.cache_smtp_config({
+            "enabled": s3.get("smtp_enabled", "false").lower() == "true",
+            "host": s3.get("smtp_host", ""),
+            "port": int(s3.get("smtp_port") or 587),
+            "username": s3.get("smtp_username", ""),
+            "password": s3.get("smtp_password", ""),
+            "from_email": s3.get("smtp_from_email", ""),
+            "from_name": s3.get("smtp_from_name", "VPN Dashboard"),
+            "use_tls": s3.get("smtp_use_tls", "true").lower() == "true",
+            "use_ssl": s3.get("smtp_use_ssl", "false").lower() == "true",
         })
 
     yield

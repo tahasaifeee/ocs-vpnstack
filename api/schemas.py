@@ -318,3 +318,39 @@ class SendCredentialsRequest(BaseModel):
     password: str              # plaintext password to include in the email
     server_host: str = ""
     client_url: str = ""
+
+
+# ── Node monitoring ───────────────────────────────────────────────────────────
+
+class IfaceAddress(BaseModel):
+    family: str        # "IPv4" | "IPv6" | "MAC"
+    address: str
+    netmask: str | None
+    broadcast: str | None
+
+
+class SystemRoute(BaseModel):
+    interface: str
+    destination: str   # CIDR notation
+    gateway: str | None
+    metric: int
+    is_default: bool
+    family: str        # "IPv4" | "IPv6"
+
+
+class IfaceInfo(BaseModel):
+    name: str
+    is_up: bool
+    speed_mbps: int
+    mtu: int
+    duplex: str | None
+    addresses: list[IfaceAddress]
+    rx_bytes: int
+    tx_bytes: int
+    rx_packets: int
+    tx_packets: int
+    rx_errors: int
+    tx_errors: int
+    rx_drops: int
+    tx_drops: int
+    routes: list[SystemRoute]

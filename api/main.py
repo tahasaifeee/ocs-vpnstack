@@ -24,6 +24,7 @@ from routers.network import router as network_router
 from routers.logs import router as logs_router
 from routers.reports import router as reports_router
 from routers.service import router as service_router
+from routers.node import router as node_router
 
 
 @asynccontextmanager
@@ -127,6 +128,7 @@ app.include_router(network_router)
 app.include_router(logs_router)
 app.include_router(reports_router)
 app.include_router(service_router)
+app.include_router(node_router)
 
 
 @app.get("/healthz")

@@ -34,7 +34,7 @@ async def daily_stats(
     db: AsyncSession = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    stmt = text("""
+    stmt = text(f"""
         SELECT
             date_trunc('day', connected_at AT TIME ZONE 'UTC')::date::text AS date,
             COUNT(*)                   AS total_sessions,
@@ -42,11 +42,11 @@ async def daily_stats(
             COALESCE(SUM(bytes_out),0) AS total_bytes_out,
             COUNT(DISTINCT user_id)    AS unique_users
         FROM session_logs
-        WHERE connected_at >= NOW() - INTERVAL :interval
+        WHERE connected_at >= NOW() - INTERVAL '{days} days'
         GROUP BY 1
         ORDER BY 1
     """)
-    result = await db.execute(stmt, {"interval": f"{days} days"})
+    result = await db.execute(stmt)
     rows = result.fetchall()
     return [
         DailyStatOut(
@@ -68,7 +68,7 @@ async def monthly_stats(
     db: AsyncSession = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    stmt = text("""
+    stmt = text(f"""
         SELECT
             to_char(date_trunc('month', connected_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
             COUNT(*)                   AS total_sessions,
@@ -76,11 +76,11 @@ async def monthly_stats(
             COALESCE(SUM(bytes_out),0) AS total_bytes_out,
             COUNT(DISTINCT user_id)    AS unique_users
         FROM session_logs
-        WHERE connected_at >= NOW() - INTERVAL :interval
+        WHERE connected_at >= NOW() - INTERVAL '{months} months'
         GROUP BY 1
         ORDER BY 1
     """)
-    result = await db.execute(stmt, {"interval": f"{months} months"})
+    result = await db.execute(stmt)
     rows = result.fetchall()
     return [
         MonthlyStatOut(
@@ -170,16 +170,16 @@ async def peak_hours(
     db: AsyncSession = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
 ):
-    stmt = text("""
+    stmt = text(f"""
         SELECT
             EXTRACT(HOUR FROM connected_at AT TIME ZONE 'UTC')::int AS hour,
             COUNT(*) AS session_count
         FROM session_logs
-        WHERE connected_at >= NOW() - INTERVAL :interval
+        WHERE connected_at >= NOW() - INTERVAL '{days} days'
         GROUP BY 1
         ORDER BY 1
     """)
-    result = await db.execute(stmt, {"interval": f"{days} days"})
+    result = await db.execute(stmt)
     rows_map = {r.hour: r.session_count for r in result.fetchall()}
     # Return all 24 hours, filling zeros for hours with no data
     return [

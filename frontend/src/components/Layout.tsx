@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Shield, Users, Activity, BarChart2, Settings, LogOut, UsersRound, Network, FileText, TrendingUp, Sliders } from 'lucide-react'
+import { Shield, Users, Activity, BarChart2, Settings, LogOut, UsersRound, Network, FileText, TrendingUp, Sliders, Server } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/stats',    icon: BarChart2,   label: 'Stats' },
   { to: '/groups',   icon: UsersRound,  label: 'Groups' },
   { to: '/network',  icon: Network,     label: 'Network' },
+  { to: '/node',     icon: Server,      label: 'Node' },
   { to: '/logs',     icon: FileText,    label: 'Logs' },
   { to: '/reports',  icon: TrendingUp,  label: 'Reports' },
   { to: '/service',  icon: Sliders,     label: 'Service' },

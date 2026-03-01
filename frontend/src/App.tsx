@@ -12,6 +12,7 @@ import Network from './pages/Network'
 import Logs from './pages/Logs'
 import Reports from './pages/Reports'
 import Service from './pages/Service'
+import Node from './pages/Node'
 
 /**
  * On every page load, if we have a refresh token but no access token (the
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="logs"     element={<Logs />} />
           <Route path="reports"  element={<Reports />} />
           <Route path="service"  element={<Service />} />
+          <Route path="node"     element={<Node />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

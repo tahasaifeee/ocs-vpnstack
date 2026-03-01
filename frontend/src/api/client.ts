@@ -147,6 +147,15 @@ export const reportsApi = {
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
+// ── Node monitoring ───────────────────────────────────────────────────────────
+
+export const nodeApi = {
+  interfaces: () => api.get('/node/interfaces').then((r) => r.data),
+  traffic: () => api.get('/node/interfaces/traffic').then((r) => r.data),
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
 export const serviceApi = {
   status: () => api.get('/service/status').then((r) => r.data),
   reload: () => api.post('/service/reload').then((r) => r.data),

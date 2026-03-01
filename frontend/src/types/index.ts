@@ -192,3 +192,42 @@ export interface VpnClientSettings {
   server_address: string
   client_url: string
 }
+
+// ── Node monitoring ───────────────────────────────────────────────────────────
+
+export interface IfaceAddress {
+  family: string        // "IPv4" | "IPv6" | "MAC"
+  address: string
+  netmask: string | null
+  broadcast: string | null
+}
+
+export interface SystemRoute {
+  interface: string
+  destination: string   // CIDR
+  gateway: string | null
+  metric: number
+  is_default: boolean
+  family: string
+}
+
+export interface IfaceInfo {
+  name: string
+  is_up: boolean
+  speed_mbps: number
+  mtu: number
+  duplex: string | null
+  addresses: IfaceAddress[]
+  rx_bytes: number
+  tx_bytes: number
+  rx_packets: number
+  tx_packets: number
+  rx_errors: number
+  tx_errors: number
+  rx_drops: number
+  tx_drops: number
+  routes: SystemRoute[]
+}
+
+// key = interface name
+export type TrafficRates = Record<string, { rx_bps: number; tx_bps: number }>

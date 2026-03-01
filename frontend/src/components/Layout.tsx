@@ -1,17 +1,36 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Shield, Users, Activity, BarChart2, Settings, LogOut, UsersRound, Network, FileText, TrendingUp, Sliders, Server } from 'lucide-react'
+import {
+  Shield, Users, Activity, BarChart2, Settings, LogOut,
+  UsersRound, Network, FileText, TrendingUp, Sliders, Server,
+  ChevronRight,
+} from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 
-const navItems = [
-  { to: '/users',    icon: Users,       label: 'Users' },
-  { to: '/sessions', icon: Activity,    label: 'Sessions' },
-  { to: '/stats',    icon: BarChart2,   label: 'Stats' },
-  { to: '/groups',   icon: UsersRound,  label: 'Groups' },
-  { to: '/network',  icon: Network,     label: 'Network' },
-  { to: '/node',     icon: Server,      label: 'Node' },
-  { to: '/logs',     icon: FileText,    label: 'Logs' },
-  { to: '/reports',  icon: TrendingUp,  label: 'Reports' },
-  { to: '/service',  icon: Sliders,     label: 'Service' },
+const NAV_GROUPS = [
+  {
+    label: 'Management',
+    items: [
+      { to: '/users',  icon: Users,      label: 'Users' },
+      { to: '/groups', icon: UsersRound, label: 'Groups' },
+    ],
+  },
+  {
+    label: 'Monitoring',
+    items: [
+      { to: '/sessions', icon: Activity,   label: 'Sessions' },
+      { to: '/stats',    icon: BarChart2,  label: 'Statistics' },
+      { to: '/node',     icon: Server,     label: 'Node' },
+      { to: '/logs',     icon: FileText,   label: 'Logs' },
+      { to: '/reports',  icon: TrendingUp, label: 'Reports' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { to: '/network', icon: Network, label: 'Network' },
+      { to: '/service', icon: Sliders, label: 'Service' },
+    ],
+  },
 ]
 
 export default function Layout() {
@@ -23,68 +42,122 @@ export default function Layout() {
     navigate('/login')
   }
 
+  const initials = adminUsername ? adminUsername.slice(0, 2).toUpperCase() : '?'
+
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
-      {/* Sidebar */}
-      <aside className="w-56 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-        <div className="flex items-center gap-2 px-4 py-5 border-b border-gray-800">
-          <Shield className="text-blue-400" size={22} />
-          <span className="font-bold text-lg tracking-tight">VPN Admin</span>
+
+      {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
+      <aside className="w-[220px] flex-shrink-0 flex flex-col bg-[#0c1018] border-r border-white/[0.06]">
+
+        {/* Logo */}
+        <div className="flex items-center gap-3 px-4 h-[58px] border-b border-white/[0.06] flex-shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-900/60 flex-shrink-0">
+            <Shield size={15} className="text-white" />
+          </div>
+          <div className="leading-tight min-w-0">
+            <p className="text-[13px] font-bold tracking-tight truncate">VPN Admin</p>
+            <p className="text-[10px] text-gray-600 truncate">Management Portal</p>
+          </div>
         </div>
 
-        <nav className="flex-1 px-2 py-4 space-y-1">
-          {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
-                }`
-              }
-            >
-              <Icon size={16} />
-              {label}
-            </NavLink>
+        {/* Nav groups */}
+        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4 scrollbar-thin">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-700 px-3 mb-1">
+                {group.label}
+              </p>
+              <div className="space-y-px">
+                {group.items.map(({ to, icon: Icon, label }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    className={({ isActive }) =>
+                      `group flex items-center gap-2.5 px-3 py-[7px] rounded-md text-[13px] font-medium transition-all duration-150 ${
+                        isActive
+                          ? 'bg-blue-500/[0.12] text-blue-300 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.2)]'
+                          : 'text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]'
+                      }`
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <Icon
+                          size={14}
+                          className={`flex-shrink-0 transition-colors ${
+                            isActive ? 'text-blue-400' : 'text-gray-600 group-hover:text-gray-400'
+                          }`}
+                        />
+                        <span className="flex-1 truncate">{label}</span>
+                        {isActive && (
+                          <ChevronRight size={11} className="flex-shrink-0 text-blue-500/40" />
+                        )}
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
-        {/* Bottom: admin identity + settings + logout */}
-        <div className="px-2 py-4 border-t border-gray-800 space-y-1">
+        {/* Bottom: settings + user row */}
+        <div className="flex-shrink-0 border-t border-white/[0.06] px-2 py-3 space-y-px">
           <NavLink
             to="/settings"
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              `group flex items-center gap-2.5 px-3 py-[7px] rounded-md text-[13px] font-medium transition-all duration-150 ${
                 isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
+                  ? 'bg-blue-500/[0.12] text-blue-300 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.2)]'
+                  : 'text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]'
               }`
             }
           >
-            <Settings size={16} />
-            Settings
+            {({ isActive }) => (
+              <>
+                <Settings
+                  size={14}
+                  className={`flex-shrink-0 transition-colors ${
+                    isActive ? 'text-blue-400' : 'text-gray-600 group-hover:text-gray-400'
+                  }`}
+                />
+                <span className="flex-1">Settings</span>
+                {isActive && <ChevronRight size={11} className="flex-shrink-0 text-blue-500/40" />}
+              </>
+            )}
           </NavLink>
 
-          <div className="px-3 pt-2">
-            <p className="text-xs text-gray-500 mb-2 truncate">{adminUsername}</p>
+          {/* User identity */}
+          <div className="flex items-center gap-2.5 px-3 py-2 mt-1">
+            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
+              {initials}
+            </div>
+            <p className="flex-1 text-[12px] font-medium text-gray-400 truncate min-w-0">
+              {adminUsername}
+            </p>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition-colors"
+              title="Sign out"
+              className="flex-shrink-0 text-gray-700 hover:text-red-400 transition-colors"
             >
-              <LogOut size={14} /> Logout
+              <LogOut size={13} />
             </button>
           </div>
         </div>
       </aside>
 
-      {/* Main */}
-      <main className="flex-1 overflow-auto bg-gray-950">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <Outlet />
-        </div>
-      </main>
+      {/* ── Main ────────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Thin top bar — visual separator + future global actions */}
+        <header className="flex-shrink-0 h-[58px] bg-gray-950/60 border-b border-white/[0.05] backdrop-blur-sm" />
+
+        <main className="flex-1 overflow-auto">
+          <div className="max-w-6xl mx-auto px-6 py-7">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

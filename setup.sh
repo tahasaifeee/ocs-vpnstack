@@ -247,13 +247,10 @@ collect_config() {
   read -r TLS_CHOICE
   TLS_CHOICE="${TLS_CHOICE:-1}"
 
-  # VPN subnet
-  ask "VPN IP subnet [172.16.0.0/16]:"
-  read -r VPN_SUBNET
-  VPN_SUBNET="${VPN_SUBNET:-172.16.0.0/16}"
+  # Note: VPN subnet is configured via the Network page in the dashboard after setup.
 
   # Export for later use
-  export SERVER_HOST DASHBOARD_PORT VPN_PORT ADMIN_USER ADMIN_PASS PG_PASS SECRET_KEY TLS_CHOICE VPN_SUBNET
+  export SERVER_HOST DASHBOARD_PORT VPN_PORT ADMIN_USER ADMIN_PASS PG_PASS SECRET_KEY TLS_CHOICE
 
   echo ""
   success "Configuration collected"
@@ -334,7 +331,6 @@ SAVED_VPN_PORT=${VPN_PORT}
 SAVED_DASHBOARD_PORT=${DASHBOARD_PORT}
 SAVED_SERVER_HOST=${SERVER_HOST}
 SAVED_TLS_CHOICE=${TLS_CHOICE}
-SAVED_VPN_SUBNET=${VPN_SUBNET}
 INSTALL_DATE="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 STATE
   success "Install state saved to $STATE_FILE"
@@ -350,7 +346,6 @@ load_state() {
   DASHBOARD_PORT="${SAVED_DASHBOARD_PORT:-8443}"
   SERVER_HOST="${SAVED_SERVER_HOST:-localhost}"
   TLS_CHOICE="${SAVED_TLS_CHOICE:-1}"
-  VPN_SUBNET="${SAVED_VPN_SUBNET:-172.16.0.0/16}"
   success "Loaded config: VPN=$VPN_PORT  Dashboard=$DASHBOARD_PORT  Host=$SERVER_HOST"
 }
 
@@ -394,6 +389,24 @@ patch_compose() {
   sed -i "s|\"8443:8443\"|\"${DASHBOARD_PORT}:8443\"|g" "$COMPOSE"
 
   success "Ports patched (VPN: $VPN_PORT, Dashboard: $DASHBOARD_PORT)"
+}
+
+# ── Patch nginx HTTP redirect port ────────────────────────────────────────────
+# nginx.conf hard-codes port 8443 in the HTTP→HTTPS redirect.  When the user
+# chooses a different dashboard port the redirect must point to the real port,
+# otherwise browsers following the HTTP redirect would hit the wrong port.
+patch_nginx() {
+  local NGINX_CONF="$INSTALL_DIR/nginx/nginx.conf"
+  [ -f "$NGINX_CONF" ] || { warn "nginx.conf not found at $NGINX_CONF — skipping nginx patch"; return; }
+
+  # The redirect line in the git version always reads:
+  #   return 301 https://$host:8443$request_uri;
+  # We replace the hardcoded 8443 with the actual dashboard port.
+  # \$host and \$request_uri are nginx variables — the \$ prevents bash expansion.
+  sed -i "s|https://\$host:8443\$request_uri|https://\$host:${DASHBOARD_PORT}\$request_uri|g" \
+    "$NGINX_CONF"
+
+  success "nginx HTTP redirect port set to $DASHBOARD_PORT"
 }
 
 # ── Start Services ────────────────────────────────────────────────────────────
@@ -627,9 +640,11 @@ update() {
   cp "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.bak.$(date +%Y%m%d%H%M%S)"
   success ".env backed up"
 
-  # 7. Reset docker-compose.yml to the git version so pull is clean
-  #    (we patch it after pulling fresh code)
-  git checkout HEAD -- docker-compose.yml 2>/dev/null || true
+  # 7. Reset patched files to git versions so the pull applies cleanly.
+  #    docker-compose.yml and nginx/nginx.conf are both patched during install;
+  #    we restore them here so `git pull --ff-only` never hits a conflict,
+  #    then re-apply the patches once the new code is in place.
+  git checkout HEAD -- docker-compose.yml nginx/nginx.conf 2>/dev/null || true
 
   # 8. Pull new code
   step "Pulling latest code"
@@ -650,6 +665,12 @@ update() {
   sed -i "s|\"443:443/udp\"|\"${VPN_PORT}:443/udp\"|g"   docker-compose.yml
   sed -i "s|\"8443:8443\"|\"${DASHBOARD_PORT}:8443\"|g"  docker-compose.yml
   success "Ports re-applied (VPN: $VPN_PORT, Dashboard: $DASHBOARD_PORT)"
+
+  # Re-apply nginx HTTP redirect port (git checkout above restored the hardcoded 8443)
+  patch_nginx
+  # Ensure nginx is reloaded after the config is re-patched, even if git diff
+  # didn't flag nginx/ as changed in this particular update.
+  NGINX_CHANGED=true
 
   # 11. Pull updated base images
   step "Pulling updated base images"
@@ -1193,6 +1214,7 @@ collect_config
 generate_certs
 write_env
 patch_compose
+patch_nginx
 save_state
 start_services
 wait_for_api
